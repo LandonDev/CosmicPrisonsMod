@@ -80,6 +80,7 @@ import net.minecraft.particle.ParticleTypes;
 import net.minecraft.registry.tag.ItemTags;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.slot.Slot;
+import net.minecraft.sound.SoundEvents;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.hit.BlockHitResult;
@@ -137,18 +138,24 @@ public final class CompanionClientRuntime {
     private static final int PING_BEAM_HEIGHT = 2048;
     private static final int PING_BEAM_COLOR_GANG = 0x45A8FF;
     private static final int PING_BEAM_COLOR_TRUCE = 0xFFAF4D;
+    private static final int PING_BEAM_COLOR_COORDS = 0xFFF945FF;
     private static final float PING_BEAM_INNER_RADIUS = 0.2F;
     private static final float PING_BEAM_OUTER_RADIUS = 0.25F;
     private static final int PING_LABEL_TEXT_COLOR_GANG = 0xFFE4F4FF;
     private static final int PING_LABEL_TEXT_COLOR_TRUCE = 0xFFFFEEDB;
+    private static final int PING_LABEL_TEXT_COLOR_COORDS = 0xFFA8A8A8;
     private static final int PING_LABEL_DISTANCE_COLOR_GANG = 0xFFB7DFFF;
     private static final int PING_LABEL_DISTANCE_COLOR_TRUCE = 0xFFFFD4AA;
+    private static final int PING_LABEL_DISTANCE_COLOR_COORDS = 0xFF858585;
     private static final int PING_LABEL_FRAME_COLOR_GANG = 0xFF3E90CE;
     private static final int PING_LABEL_FRAME_COLOR_TRUCE = 0xFFD77A2A;
+    private static final int PING_LABEL_FRAME_COLOR_COORDS = 0xFFF377F7;
     private static final int PING_LABEL_BACKGROUND_COLOR_GANG = 0x132435;
     private static final int PING_LABEL_BACKGROUND_COLOR_TRUCE = 0x2F1C0D;
+    private static final int PING_LABEL_BACKGROUND_COLOR_COORDS = 0x341036;
     private static final double PING_LABEL_VERTICAL_OFFSET = 1.02D;
     private static final long MILLIS_PER_SECOND = 1000L;
+    private static final long COORDS_PING_LIFETIME_MILLIS = 5L * 60L * 1000L; // 5 mins
     private static final long PING_FEEDBACK_COOLDOWN_MILLIS = 1500L;
     private static final long UPDATE_CHECK_INTERVAL_MILLIS = 60_000L;
     private static final String MOD_RELEASE_MANIFEST_URL =
@@ -188,6 +195,9 @@ public final class CompanionClientRuntime {
             new Int2ObjectOpenHashMap<>();
     private KeyBinding gangPingKeyBinding;
     private KeyBinding trucePingKeyBinding;
+
+    private CoordsPingInfo coordsPing = null;
+    private static final Vec3d COORDS_PING_BEAM_OFFSET = new Vec3d(0.5D, 0D, 0.5D);
 
     private CompanionConfig config;
     private BuildAttestation buildAttestation;
@@ -3784,6 +3794,81 @@ public final class CompanionClientRuntime {
         return Math.max(0.0F, Math.min(1.0F, value));
     }
 
+    private record CoordsPingInfo(Vec3d pos, long expiresAtMillis, Identifier worldId) {
+        private boolean isExpired() {
+            return expiresAtMillis < System.currentTimeMillis();
+        }
+    }
+
+    /**
+     * Adds or removes the coords ping based on the given pos. If the given position is the same as
+     * the existing coordinates ping, and the player is in the same world, then the existing beacon
+     * is removed. Otherwise, a new ping is created at the given location. Will also play a sound
+     * effect based on whether the beacon is added or removed.
+     *
+     * @param pos The position of the beacon to be added or removed
+     */
+    public void addOrRemoveCoordsPing(Vec3d pos) {
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client.world == null) {
+            return;
+        }
+
+        // If this ping is not identical to the existing ping, then set the ping to this location
+        if (coordsPing == null
+                || !pos.equals(coordsPing.pos.subtract(COORDS_PING_BEAM_OFFSET))
+                || !client.world.getRegistryKey().getValue().equals(coordsPing.worldId)
+                || coordsPing.isExpired()) {
+            setCoordsPing(pos);
+        } else {
+            // This ping is the same one as the previous one, so instead of placing a new ping,
+            // remove the old one
+            deleteCoordsPing();
+        }
+    }
+
+    /**
+     * Updates the current coordinates ping to the given location. This ping will be visible to the
+     * player for the next {@value
+     * me.landon.client.runtime.CompanionClientRuntime#COORDS_PING_LIFETIME_MILLIS} milliseconds.
+     * Also plays a sound effect to the player for this action.
+     *
+     * @param pos the location of the new ping.
+     */
+    private void setCoordsPing(Vec3d pos) {
+        MinecraftClient client = MinecraftClient.getInstance();
+        client.execute(
+                () -> {
+                    if (client.world == null) return;
+
+                    Vec3d centered = new Vec3d(pos.x, pos.y, pos.z).add(COORDS_PING_BEAM_OFFSET);
+                    long expires =
+                            safeAddMillis(System.currentTimeMillis(), COORDS_PING_LIFETIME_MILLIS);
+                    Identifier worldId = client.world.getRegistryKey().getValue();
+
+                    synchronized (this) {
+                        coordsPing = new CoordsPingInfo(centered, expires, worldId);
+                    }
+
+                    if (client.player != null) {
+                        client.player.playSound(SoundEvents.ENTITY_EXPERIENCE_ORB_PICKUP, 1f, 1.2f);
+                    }
+                });
+    }
+
+    /**
+     * Deletes any active coords ping by setting coordsPing to null. Also plays a sound effect to
+     * the player for this action.
+     */
+    private void deleteCoordsPing() {
+        coordsPing = null;
+
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client.player != null) {
+            client.player.playSound(SoundEvents.ENTITY_ENDER_EYE_DEATH, 1f, 1.0f);
+        }
+    }
+
     private void processPingKeybinds(MinecraftClient client) {
         if (gangPingKeyBinding == null || trucePingKeyBinding == null) {
             return;
@@ -3866,8 +3951,7 @@ public final class CompanionClientRuntime {
     }
 
     private void renderPingBeaconBeams(MinecraftClient client, WorldRenderContext context) {
-        if (!shouldRenderPingBeacons(client)
-                || client.world == null
+        if (client.world == null
                 || context == null
                 || context.matrices() == null
                 || context.commandQueue() == null
@@ -3883,6 +3967,14 @@ public final class CompanionClientRuntime {
                 (float) Math.floorMod(client.world.getTime(), 40L) + tickProgress;
         Vec3d cameraPos = client.gameRenderer.getCamera().getCameraPos();
         long now = System.currentTimeMillis();
+
+        renderPingBeaconBeams(
+                client, context, cameraPos, beamRotationDegrees, PING_BEAM_COLOR_COORDS);
+
+        if (!shouldRenderPingBeacons(client)) {
+            return;
+        }
+
         IntSet gangEntityIds =
                 resolveActivePingVisualIds(
                         session.gangPingBeaconIdsSnapshot(),
@@ -3954,15 +4046,69 @@ public final class CompanionClientRuntime {
         }
     }
 
+    private void renderPingBeaconBeams(
+            MinecraftClient client,
+            WorldRenderContext context,
+            Vec3d cameraPos,
+            float beamRotationDegrees,
+            int beamColor) {
+        CoordsPingInfo ping;
+        synchronized (this) {
+            ping = this.coordsPing;
+        }
+        if (ping == null) return;
+
+        if (client == null || client.world == null) return;
+        // If this ping has expired, don't render it
+        if (ping.isExpired()) return;
+
+        // If this ping is on a different world, don't render it
+        Identifier currentWorldId = client.world.getRegistryKey().getValue();
+        if (ping.worldId() != null && !ping.worldId().equals(currentWorldId)) return;
+
+        Vec3d pos = ping.pos();
+        if (pos == null || !pos.isFinite()) return;
+
+        var matrices = context.matrices();
+        var commandQueue = context.commandQueue();
+
+        double beamBaseY = pos.y + 0.1D;
+
+        matrices.push();
+        matrices.translate(
+                pos.x - cameraPos.x - 0.5D, beamBaseY - cameraPos.y, pos.z - cameraPos.z - 0.5D);
+
+        BeaconBlockEntityRenderer.renderBeam(
+                matrices,
+                commandQueue,
+                BeaconBlockEntityRenderer.BEAM_TEXTURE,
+                1.0F,
+                beamRotationDegrees,
+                0,
+                PING_BEAM_HEIGHT,
+                beamColor,
+                PING_BEAM_INNER_RADIUS,
+                PING_BEAM_OUTER_RADIUS);
+
+        matrices.pop();
+    }
+
     private void renderPingBeaconLabels(DrawContext drawContext, RenderTickCounter tickCounter) {
         MinecraftClient client = MinecraftClient.getInstance();
-        if (!shouldRenderPingBeacons(client)
-                || drawContext == null
+
+        if (drawContext == null
                 || client.world == null
                 || client.player == null
                 || client.gameRenderer == null
                 || client.gameRenderer.getCamera() == null
                 || client.textRenderer == null) {
+            return;
+        }
+
+        // Render the coords ping
+        renderCoordsPingBeaconLabel(drawContext, client);
+
+        if (!shouldRenderPingBeacons(client)) {
             return;
         }
 
@@ -4096,6 +4242,76 @@ public final class CompanionClientRuntime {
         }
     }
 
+    private void renderCoordsPingBeaconLabel(DrawContext drawContext, MinecraftClient client) {
+        if (client == null
+                || client.world == null
+                || client.player == null
+                || client.textRenderer == null
+                || client.gameRenderer == null
+                || client.gameRenderer.getCamera() == null) {
+            return;
+        }
+
+        CoordsPingInfo info;
+        synchronized (this) {
+            info = this.coordsPing;
+        }
+        if (info == null) return;
+
+        if (info.isExpired()) return;
+
+        Identifier currentWorldId = client.world.getRegistryKey().getValue();
+        if (info.worldId() != null && !info.worldId().equals(currentWorldId)) return;
+
+        Vec3d pos = info.pos();
+        if (pos == null || !pos.isFinite()) return;
+
+        Vec3d labelAnchor = pos.add(0.0D, PING_LABEL_VERTICAL_OFFSET, 0.0D);
+
+        int screenWidth = drawContext.getScaledWindowWidth();
+        int screenHeight = drawContext.getScaledWindowHeight();
+
+        Vec3d cameraPos = client.gameRenderer.getCamera().getCameraPos();
+        Vec3d cameraLookDirection =
+                Vec3d.fromPolar(
+                                client.gameRenderer.getCamera().getPitch(),
+                                client.gameRenderer.getCamera().getYaw())
+                        .normalize();
+
+        if (labelAnchor.subtract(cameraPos).dotProduct(cameraLookDirection) <= 0.0D) return;
+
+        Vec3d projected = client.gameRenderer.project(labelAnchor);
+        if (!projected.isFinite()) return;
+
+        double normalizedX = (projected.x * 0.5D) + 0.5D;
+        double normalizedY = 0.5D - (projected.y * 0.5D);
+        if (!Double.isFinite(normalizedX) || !Double.isFinite(normalizedY)) return;
+
+        int centerX = (int) Math.round(normalizedX * screenWidth);
+        int anchorY = (int) Math.round(normalizedY * screenHeight);
+
+        String name =
+                String.format(
+                        java.util.Locale.ROOT,
+                        "(%d, %d, %d)",
+                        (int) Math.floor(pos.x),
+                        (int) Math.floor(pos.y),
+                        (int) Math.floor(pos.z));
+
+        drawPingBeaconLabel(
+                drawContext,
+                client.textRenderer,
+                centerX,
+                anchorY,
+                name,
+                Float.NaN,
+                Math.sqrt(client.player.squaredDistanceTo(labelAnchor)),
+                PING_LABEL_TEXT_COLOR_COORDS,
+                PING_LABEL_DISTANCE_COLOR_COORDS,
+                PING_LABEL_FRAME_COLOR_COORDS,
+                PING_LABEL_BACKGROUND_COLOR_COORDS);
+    }
+
     private static void drawPingBeaconLabel(
             DrawContext drawContext,
             TextRenderer textRenderer,
@@ -4108,7 +4324,10 @@ public final class CompanionClientRuntime {
             int distanceColor,
             int frameColor,
             int backgroundColor) {
-        String lineOne = entityName + "  " + formatPingHealth(healthValue) + " HP";
+        String lineOne =
+                Float.isFinite(healthValue)
+                        ? entityName + "  " + formatPingHealth(healthValue) + " HP"
+                        : entityName;
         String lineTwo = Math.max(0, (int) Math.round(distance)) + " blocks away";
         int lineOneWidth = textRenderer.getWidth(lineOne);
         int lineTwoWidth = textRenderer.getWidth(lineTwo);
