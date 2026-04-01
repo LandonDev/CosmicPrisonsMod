@@ -4,6 +4,8 @@
   "package": "me.landon.mixin.client",
   "compatibilityLevel": "JAVA_21",
   "client": [
+    "ClickableCoordinatesMixin",
+    "CoordsClickHandlingMixin",
     "CustomPayloadCodecFallbackMixin",
     "EquipmentRendererPeacefulMiningGhostMixin",
     "GameRendererPeacefulMiningMixin",

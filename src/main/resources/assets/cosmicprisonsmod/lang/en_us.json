@@ -123,6 +123,7 @@
   "text.cosmicprisonsmod.ping_visuals.particles_on": "Particles: ON",
   "text.cosmicprisonsmod.ping_visuals.particles_off": "Particles: OFF",
   "text.cosmicprisonsmod.ping_visuals.reset_button": "Reset Visuals",
+  "text.cosmicprisonsmod.coords_ping.hover_coordinates": "Click to create or remove ping",
   "key.cosmicprisonsmod.ping.gang": "Gang Ping",
   "key.cosmicprisonsmod.ping.truce": "Truce Ping",
   "key.categories.cosmicprisonsmod.pings": "Cosmic Prisons Pings",
