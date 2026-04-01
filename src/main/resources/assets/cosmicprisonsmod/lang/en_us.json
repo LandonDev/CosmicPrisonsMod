@@ -1,4 +1,5 @@
 {
+  "key.category.cosmicprisonsmod.pings": "Pins",
   "text.cosmicprisonsmod.server_not_allowed": "Companion blocked: serverId '%s' is not in allowedServerIds",
   "text.cosmicprisonsmod.settings.title": "Cosmic Prisons Mod Settings",
   "text.cosmicprisonsmod.settings.subtitle": "Feature cards let you toggle and inspect each module.",
