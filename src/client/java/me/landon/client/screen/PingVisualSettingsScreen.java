@@ -18,6 +18,7 @@ public final class PingVisualSettingsScreen extends Screen {
 
     private ButtonWidget durationDecreaseButton;
     private ButtonWidget durationIncreaseButton;
+    private ButtonWidget modeToggleButton;
     private ButtonWidget particlesToggleButton;
 
     public PingVisualSettingsScreen(CompanionClientRuntime runtime, Screen parent) {
@@ -48,10 +49,20 @@ public final class PingVisualSettingsScreen extends Screen {
                 addDrawableChild(
                         ButtonWidget.builder(Text.empty(), button -> toggleParticles())
                                 .dimensions(
+                                        rowX + rowWidth - 130,
+                                        LIST_TOP + (ROW_HEIGHT * 2) + 4,
+                                        126,
+                                        20)
+                                .build());
+
+        modeToggleButton =
+                addDrawableChild(
+                        ButtonWidget.builder(Text.empty(), button -> toggleMode())
+                                .dimensions(
                                         rowX + rowWidth - 130, LIST_TOP + ROW_HEIGHT + 4, 126, 20)
                                 .build());
 
-        int footerY = LIST_TOP + (ROW_HEIGHT * 2) + 20;
+        int footerY = LIST_TOP + (ROW_HEIGHT * 3) + 20;
         addDrawableChild(
                 ButtonWidget.builder(
                                 Text.translatable(
@@ -107,7 +118,7 @@ public final class PingVisualSettingsScreen extends Screen {
                 textRenderer,
                 Text.translatable("text.cosmicprisonsmod.ping_visuals.duration_bounds"),
                 width / 2,
-                LIST_TOP + (ROW_HEIGHT * 2) + 4,
+                LIST_TOP + (ROW_HEIGHT * 3) + 4,
                 0xFFC6D4E8);
 
         super.render(drawContext, mouseX, mouseY, deltaTicks);
@@ -128,6 +139,13 @@ public final class PingVisualSettingsScreen extends Screen {
                 drawContext,
                 rowX,
                 LIST_TOP + ROW_HEIGHT,
+                rowWidth,
+                Text.translatable("text.cosmicprisonsmod.ping_visuals.mode_label"),
+                0xFF4A7A5F);
+        renderRow(
+                drawContext,
+                rowX,
+                LIST_TOP + (ROW_HEIGHT * 2),
                 rowWidth,
                 Text.translatable("text.cosmicprisonsmod.ping_visuals.particles_label"),
                 0xFF9A693A);
@@ -165,9 +183,18 @@ public final class PingVisualSettingsScreen extends Screen {
         refreshControls();
     }
 
+    private void toggleMode() {
+        runtime.setPingVisualMode(
+                runtime.pingVisualModeStatic()
+                        ? CompanionConfig.PING_VISUAL_MODE_FOLLOW
+                        : CompanionConfig.PING_VISUAL_MODE_STATIC);
+        refreshControls();
+    }
+
     private void refreshControls() {
         if (durationDecreaseButton == null
                 || durationIncreaseButton == null
+                || modeToggleButton == null
                 || particlesToggleButton == null) {
             return;
         }
@@ -177,6 +204,10 @@ public final class PingVisualSettingsScreen extends Screen {
                 currentDuration > CompanionConfig.PING_VISUAL_DURATION_SECONDS_MIN;
         durationIncreaseButton.active =
                 currentDuration < CompanionConfig.PING_VISUAL_DURATION_SECONDS_MAX;
+        modeToggleButton.setMessage(
+                runtime.pingVisualModeStatic()
+                        ? Text.translatable("text.cosmicprisonsmod.ping_visuals.mode_static")
+                        : Text.translatable("text.cosmicprisonsmod.ping_visuals.mode_follow"));
         particlesToggleButton.setMessage(
                 runtime.pingParticlesEnabled()
                         ? Text.translatable("text.cosmicprisonsmod.ping_visuals.particles_on")

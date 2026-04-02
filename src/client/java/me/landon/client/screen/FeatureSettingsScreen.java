@@ -18,12 +18,14 @@ import net.minecraft.text.Text;
 import org.lwjgl.glfw.GLFW;
 
 public final class FeatureSettingsScreen extends Screen {
-    private static final int GRID_TOP = 50;
+    private static final int GRID_TOP = 58;
     private static final int CARD_WIDTH = 176;
     private static final int CARD_HEIGHT = 92;
     private static final int CARD_GAP = 10;
     private static final int POPUP_BASE_WIDTH = 320;
     private static final int POPUP_BASE_HEIGHT = 232;
+    private static final int FEATURE_SUMMARY_MAX_LINES = 2;
+    private static final int ICON_FRAME_SIZE = 28;
 
     private final CompanionClientRuntime runtime;
     private final List<ButtonWidget> mainButtons = new ArrayList<>();
@@ -44,6 +46,12 @@ public final class FeatureSettingsScreen extends Screen {
         super.init();
         features = runtime.getAvailableFeatures();
         mainButtons.clear();
+
+        int footerButtonWidth = Math.min(144, (width - 42) / 2);
+        int footerGap = 10;
+        int footerRowWidth = (footerButtonWidth * 2) + footerGap;
+        int footerStartX = (width - footerRowWidth) / 2;
+        int footerButtonY = height - 28;
 
         for (int index = 0; index < features.size(); index++) {
             ClientFeatureDefinition feature = features.get(index);
@@ -79,13 +87,27 @@ public final class FeatureSettingsScreen extends Screen {
             mainButtons.add(toggleButton);
         }
 
+        ButtonWidget hudLayoutButton =
+                addDrawableChild(
+                        ButtonWidget.builder(
+                                        Text.translatable(
+                                                "text.cosmicprisonsmod.settings.button.hud_layout"),
+                                        button -> openHudLayoutEditor())
+                                .dimensions(footerStartX, footerButtonY, footerButtonWidth, 20)
+                                .build());
+        mainButtons.add(hudLayoutButton);
+
         ButtonWidget doneButton =
                 addDrawableChild(
                         ButtonWidget.builder(
                                         Text.translatable(
                                                 "text.cosmicprisonsmod.settings.button.done"),
                                         button -> close())
-                                .dimensions((width / 2) - 74, height - 28, 148, 20)
+                                .dimensions(
+                                        footerStartX + footerButtonWidth + footerGap,
+                                        footerButtonY,
+                                        footerButtonWidth,
+                                        20)
                                 .build());
         mainButtons.add(doneButton);
 
@@ -184,19 +206,62 @@ public final class FeatureSettingsScreen extends Screen {
 
     @Override
     public void render(DrawContext drawContext, int mouseX, int mouseY, float deltaTicks) {
-        drawContext.fill(0, 0, width, height, 0xB010131A);
-        drawContext.fill(0, 0, width, 32, 0x6B213655);
-        drawContext.drawCenteredTextWithShadow(textRenderer, title, width / 2, 11, 0xFFFFFFFF);
-        drawContext.drawCenteredTextWithShadow(
-                textRenderer,
-                Text.translatable("text.cosmicprisonsmod.settings.subtitle"),
-                width / 2,
-                36,
-                0xFFB8C7DB);
+        drawContext.fill(0, 0, width, height, 0xC00C121B);
+        drawContext.fill(0, 0, width, 36, 0x5A182437);
+
+        renderHeader(drawContext);
+        renderFeatureDeck(drawContext);
+        renderFooterBand(drawContext);
 
         renderFeatureCards(drawContext);
         super.render(drawContext, mouseX, mouseY, deltaTicks);
         renderPopup(drawContext);
+    }
+
+    private void renderHeader(DrawContext drawContext) {
+        int panelWidth = Math.min(372, width - 24);
+        int panelHeight = 44;
+        int x = (width - panelWidth) / 2;
+        int y = 8;
+        int right = x + panelWidth;
+        int bottom = y + panelHeight;
+
+        drawContext.fill(x - 2, y - 2, right + 2, bottom + 2, withAlpha(0x030609, 156));
+        drawContext.fill(x, y, right, bottom, withAlpha(0x121C2A, 242));
+        drawContext.fill(x, y, right, y + 2, withAlpha(0x5D93D5, 255));
+        drawContext.fill(x + 18, bottom - 5, right - 18, bottom - 4, withAlpha(0x344A69, 255));
+
+        drawScaledCenteredText(drawContext, title, width / 2, y + 8, 0xFFFFFFFF, 1.15F);
+        drawContext.drawCenteredTextWithShadow(
+                textRenderer,
+                Text.translatable("text.cosmicprisonsmod.settings.subtitle"),
+                width / 2,
+                y + 28,
+                0xFFB9C9DD);
+    }
+
+    private void renderFeatureDeck(DrawContext drawContext) {
+        int columns = gridColumns();
+        int rows = Math.max(1, (features.size() + columns - 1) / columns);
+        int gridWidth = (columns * CARD_WIDTH) + ((columns - 1) * CARD_GAP);
+        int gridHeight = (rows * CARD_HEIGHT) + ((rows - 1) * CARD_GAP);
+        int x = ((width - gridWidth) / 2) - 12;
+        int y = GRID_TOP - 8;
+        int right = x + gridWidth + 24;
+        int bottom = y + gridHeight + 16;
+
+        drawContext.fill(x - 2, y - 2, right + 2, bottom + 2, withAlpha(0x04070D, 112));
+        drawContext.fill(x, y, right, bottom, withAlpha(0x0E1622, 196));
+        drawContext.fill(x, y, right, y + 1, withAlpha(0x2F415B, 255));
+        drawContext.fill(x, bottom - 1, right, bottom, withAlpha(0x2F415B, 255));
+        drawContext.fill(x, y, x + 1, bottom, withAlpha(0x223146, 255));
+        drawContext.fill(right - 1, y, right, bottom, withAlpha(0x223146, 255));
+    }
+
+    private void renderFooterBand(DrawContext drawContext) {
+        int top = height - 40;
+        drawContext.fill(0, top - 6, width, height, withAlpha(0x0D1520, 224));
+        drawContext.fill(0, top - 6, width, top - 5, withAlpha(0x2B3D57, 255));
     }
 
     private void renderFeatureCards(DrawContext drawContext) {
@@ -245,24 +310,34 @@ public final class FeatureSettingsScreen extends Screen {
                     cardBounds.right(),
                     cardBounds.bottom(),
                     withAlpha(0x2A3752, 255));
+            drawContext.fill(
+                    cardBounds.x + 1,
+                    cardBounds.y + 3,
+                    cardBounds.right() - 1,
+                    cardBounds.y + 21,
+                    withAlpha(accentColor, 22));
 
-            drawFeatureIcon(drawContext, feature, cardBounds.x + 8, cardBounds.y + 10, accentColor);
+            drawFeatureIcon(drawContext, feature, cardBounds.x + 8, cardBounds.y + 7, accentColor);
 
             drawContext.drawTextWithShadow(
                     textRenderer,
                     Text.translatable(feature.nameTranslationKey()),
-                    cardBounds.x + 50,
-                    cardBounds.y + 14,
+                    cardBounds.x + 42,
+                    cardBounds.y + 10,
                     0xFFFFFFFF);
 
-            String summary = summaryText(feature, cardBounds.width - 20);
-            drawContext.drawWrappedTextWithShadow(
-                    textRenderer,
-                    Text.literal(summary),
-                    cardBounds.x + 10,
-                    cardBounds.y + 44,
-                    cardBounds.width - 20,
-                    0xFFB9C5D8);
+            int summaryY = cardBounds.y + 38;
+            int lineHeight = textRenderer.fontHeight + 2;
+            List<String> summaryLines =
+                    summaryLines(feature, cardBounds.width - 20, FEATURE_SUMMARY_MAX_LINES);
+            for (int lineIndex = 0; lineIndex < summaryLines.size(); lineIndex++) {
+                drawContext.drawTextWithShadow(
+                        textRenderer,
+                        summaryLines.get(lineIndex),
+                        cardBounds.x + 10,
+                        summaryY + (lineIndex * lineHeight),
+                        0xFFB9C5D8);
+            }
         }
     }
 
@@ -300,8 +375,8 @@ public final class FeatureSettingsScreen extends Screen {
         drawContext.drawTextWithShadow(
                 textRenderer,
                 Text.translatable(feature.nameTranslationKey()),
-                x + 56,
-                y + 20,
+                x + 50,
+                y + 19,
                 0xFFFFFFFF);
 
         drawContext.drawWrappedTextWithShadow(
@@ -429,6 +504,24 @@ public final class FeatureSettingsScreen extends Screen {
                     exampleHeight,
                     Text.translatable(
                             "text.cosmicprisonsmod.feature.hud_cooldowns.example.ordering"));
+            return;
+        }
+
+        if (ClientFeatures.HUD_PETS_ID.equals(feature.id())) {
+            drawPopupTextExample(
+                    drawContext,
+                    leftExampleX,
+                    examplesY,
+                    exampleWidth,
+                    exampleHeight,
+                    Text.translatable("text.cosmicprisonsmod.feature.hud_pets.example.active"));
+            drawPopupTextExample(
+                    drawContext,
+                    rightExampleX,
+                    examplesY,
+                    exampleWidth,
+                    exampleHeight,
+                    Text.translatable("text.cosmicprisonsmod.feature.hud_pets.example.ready"));
             return;
         }
 
@@ -590,19 +683,46 @@ public final class FeatureSettingsScreen extends Screen {
         return null;
     }
 
-    private String summaryText(ClientFeatureDefinition feature, int maxWidth) {
+    private List<String> summaryLines(ClientFeatureDefinition feature, int maxWidth, int maxLines) {
         String full = Text.translatable(feature.descriptionTranslationKey()).getString();
-        String trimmed = textRenderer.trimToWidth(full, maxWidth * 2);
+        String remaining = full == null ? "" : full.trim();
+        List<String> lines = new ArrayList<>();
 
-        if (trimmed.length() >= full.length()) {
-            return full;
+        while (!remaining.isEmpty() && lines.size() < maxLines) {
+            String line = textRenderer.trimToWidth(remaining, maxWidth);
+            if (line.isEmpty()) {
+                break;
+            }
+
+            int consumed = line.length();
+            if (consumed < remaining.length()) {
+                int lastSpace = line.lastIndexOf(' ');
+                if (lastSpace > 0) {
+                    line = line.substring(0, lastSpace);
+                    consumed = lastSpace;
+                }
+            }
+
+            line = line.stripTrailing();
+            if (line.isEmpty()) {
+                line = textRenderer.trimToWidth(remaining, maxWidth);
+                consumed = Math.max(1, line.length());
+            }
+
+            lines.add(line);
+            remaining = remaining.substring(Math.min(consumed, remaining.length())).stripLeading();
         }
 
-        if (trimmed.length() <= 3) {
-            return "...";
+        if (!remaining.isEmpty() && !lines.isEmpty()) {
+            int lastLineIndex = lines.size() - 1;
+            int ellipsisWidth = textRenderer.getWidth("...");
+            String clamped =
+                    textRenderer.trimToWidth(
+                            lines.get(lastLineIndex), Math.max(8, maxWidth - ellipsisWidth));
+            lines.set(lastLineIndex, clamped.isEmpty() ? "..." : clamped.stripTrailing() + "...");
         }
 
-        return trimmed.substring(0, trimmed.length() - 3) + "...";
+        return lines;
     }
 
     private void drawFeatureIcon(
@@ -611,15 +731,15 @@ public final class FeatureSettingsScreen extends Screen {
             int x,
             int y,
             int accentColor) {
-        int size = 34;
+        int size = ICON_FRAME_SIZE;
         drawContext.fill(x, y, x + size, y + size, withAlpha(0x11131A, 230));
         drawContext.fill(x, y, x + size, y + 1, withAlpha(accentColor, 255));
         drawContext.fill(x, y, x + 1, y + size, withAlpha(0x3A4B6A, 255));
         drawContext.fill(x + size - 1, y, x + size, y + size, withAlpha(0x3A4B6A, 255));
         drawContext.fill(x, y + size - 1, x + size, y + size, withAlpha(0x3A4B6A, 255));
 
-        int itemX = x + 9;
-        int itemY = y + 9;
+        int itemX = x + ((size - 16) / 2);
+        int itemY = y + ((size - 16) / 2);
 
         if (ClientFeatures.PEACEFUL_MINING_ID.equals(feature.id())) {
             drawContext.drawItem(Items.IRON_PICKAXE.getDefaultStack(), itemX, itemY);
@@ -642,6 +762,11 @@ public final class FeatureSettingsScreen extends Screen {
 
         if (ClientFeatures.HUD_COOLDOWNS_ID.equals(feature.id())) {
             drawContext.drawItem(Items.CLOCK.getDefaultStack(), itemX, itemY);
+            return;
+        }
+
+        if (ClientFeatures.HUD_PETS_ID.equals(feature.id())) {
+            drawContext.drawItem(Items.BONE.getDefaultStack(), itemX, itemY);
             return;
         }
 
@@ -673,7 +798,21 @@ public final class FeatureSettingsScreen extends Screen {
         Text icon = Text.translatable(feature.iconTranslationKey());
         int iconWidth = textRenderer.getWidth(icon);
         drawContext.drawTextWithShadow(
-                textRenderer, icon, x + ((size - iconWidth) / 2), y + 13, 0xFFFFFFFF);
+                textRenderer,
+                icon,
+                x + ((size - iconWidth) / 2),
+                y + ((size - textRenderer.fontHeight) / 2),
+                0xFFFFFFFF);
+    }
+
+    private void drawScaledCenteredText(
+            DrawContext drawContext, Text text, int centerX, int y, int color, float scale) {
+        int scaledTextX = Math.round(centerX - ((textRenderer.getWidth(text) * scale) / 2.0F));
+        drawContext.getMatrices().pushMatrix();
+        drawContext.getMatrices().translate(scaledTextX, y);
+        drawContext.getMatrices().scale(scale, scale);
+        drawContext.drawTextWithShadow(textRenderer, text, 0, 0, color);
+        drawContext.getMatrices().popMatrix();
     }
 
     private void drawOverlayTextOnItem(
@@ -728,6 +867,10 @@ public final class FeatureSettingsScreen extends Screen {
 
         if (ClientFeatures.HUD_COOLDOWNS_ID.equals(featureId)) {
             return 0x4EA7FF;
+        }
+
+        if (ClientFeatures.HUD_PETS_ID.equals(featureId)) {
+            return 0x89D56B;
         }
 
         if (ClientFeatures.HUD_EVENTS_ID.equals(featureId)) {
@@ -793,6 +936,8 @@ public final class FeatureSettingsScreen extends Screen {
             case ProtocolConstants.OVERLAY_TYPE_MONEY_NOTE -> 0xFF84F08F;
             case ProtocolConstants.OVERLAY_TYPE_GANG_POINT_NOTE -> 0xFFFFC659;
             case ProtocolConstants.OVERLAY_TYPE_SATCHEL_PERCENT -> 0xFFB5E86C;
+            case ProtocolConstants.OVERLAY_TYPE_PET_ACTIVE -> 0xFF8BF5C2;
+            case ProtocolConstants.OVERLAY_TYPE_PET_COOLDOWN -> 0xFFFFB27D;
             default -> 0xFFE6E6E6;
         };
     }
@@ -803,6 +948,8 @@ public final class FeatureSettingsScreen extends Screen {
             case ProtocolConstants.OVERLAY_TYPE_MONEY_NOTE -> 0xA01B3C25;
             case ProtocolConstants.OVERLAY_TYPE_GANG_POINT_NOTE -> 0xA04A361A;
             case ProtocolConstants.OVERLAY_TYPE_SATCHEL_PERCENT -> 0xA0284A1E;
+            case ProtocolConstants.OVERLAY_TYPE_PET_ACTIVE -> 0xA01D4733;
+            case ProtocolConstants.OVERLAY_TYPE_PET_COOLDOWN -> 0xA04E2A1B;
             default -> 0xA0333333;
         };
     }
@@ -878,22 +1025,21 @@ public final class FeatureSettingsScreen extends Screen {
                             }),
                     new PopupActionDefinition(
                             "text.cosmicprisonsmod.settings.popup.action.hud_layout",
-                            () -> {
-                                if (client != null) {
-                                    client.setScreen(new HudLayoutEditorScreen(runtime, this));
-                                }
-                            }));
+                            this::openHudLayoutEditor));
         }
 
         if (ClientFeatures.HUD_COOLDOWNS_ID.equals(featureId)) {
             return List.of(
                     new PopupActionDefinition(
                             "text.cosmicprisonsmod.settings.popup.action.hud_layout",
-                            () -> {
-                                if (client != null) {
-                                    client.setScreen(new HudLayoutEditorScreen(runtime, this));
-                                }
-                            }));
+                            this::openHudLayoutEditor));
+        }
+
+        if (ClientFeatures.HUD_PETS_ID.equals(featureId)) {
+            return List.of(
+                    new PopupActionDefinition(
+                            "text.cosmicprisonsmod.settings.popup.action.hud_layout",
+                            this::openHudLayoutEditor));
         }
 
         if (ClientFeatures.HUD_SATCHEL_DISPLAY_ID.equals(featureId)) {
@@ -907,22 +1053,14 @@ public final class FeatureSettingsScreen extends Screen {
                             }),
                     new PopupActionDefinition(
                             "text.cosmicprisonsmod.settings.popup.action.hud_layout",
-                            () -> {
-                                if (client != null) {
-                                    client.setScreen(new HudLayoutEditorScreen(runtime, this));
-                                }
-                            }));
+                            this::openHudLayoutEditor));
         }
 
         if (ClientFeatures.HUD_GANG_ID.equals(featureId)) {
             return List.of(
                     new PopupActionDefinition(
                             "text.cosmicprisonsmod.settings.popup.action.hud_layout",
-                            () -> {
-                                if (client != null) {
-                                    client.setScreen(new HudLayoutEditorScreen(runtime, this));
-                                }
-                            }));
+                            this::openHudLayoutEditor));
         }
 
         if (ClientFeatures.HUD_LEADERBOARDS_ID.equals(featureId)) {
@@ -937,11 +1075,7 @@ public final class FeatureSettingsScreen extends Screen {
                             }),
                     new PopupActionDefinition(
                             "text.cosmicprisonsmod.settings.popup.action.hud_layout",
-                            () -> {
-                                if (client != null) {
-                                    client.setScreen(new HudLayoutEditorScreen(runtime, this));
-                                }
-                            }));
+                            this::openHudLayoutEditor));
         }
 
         if (ClientFeatures.PINGS_ID.equals(featureId)) {
@@ -968,6 +1102,12 @@ public final class FeatureSettingsScreen extends Screen {
         return List.of();
     }
 
+    private void openHudLayoutEditor() {
+        if (client != null) {
+            client.setScreen(new HudLayoutEditorScreen(runtime, this));
+        }
+    }
+
     private static float easeOutBack(float value) {
         float clamped = Math.max(0.0F, Math.min(1.0F, value));
         float c1 = 1.70158F;
@@ -981,7 +1121,8 @@ public final class FeatureSettingsScreen extends Screen {
     }
 
     private static int popupExampleHeight(ClientFeatureDefinition feature) {
-        if (ClientFeatures.PINGS_ID.equals(feature.id())) {
+        if (ClientFeatures.PINGS_ID.equals(feature.id())
+                || ClientFeatures.HUD_PETS_ID.equals(feature.id())) {
             return 44;
         }
 

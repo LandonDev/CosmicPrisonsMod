@@ -13,6 +13,7 @@ public final class CompanionConfig {
     private static final String SIGNATURE_POLICY_ENFORCE = "ENFORCE";
     public static final String HUD_WIDGET_EVENTS_ID = "events";
     public static final String HUD_WIDGET_COOLDOWNS_ID = "cooldowns";
+    public static final String HUD_WIDGET_PETS_ID = "pets";
     public static final String HUD_WIDGET_SATCHELS_ID = "satchels";
     public static final String HUD_WIDGET_GANG_ID = "gang";
     public static final String HUD_WIDGET_LEADERBOARD_GIFT_ID = "leaderboard_gift";
@@ -52,6 +53,7 @@ public final class CompanionConfig {
             List.of(
                     HUD_WIDGET_EVENTS_ID,
                     HUD_WIDGET_COOLDOWNS_ID,
+                    HUD_WIDGET_PETS_ID,
                     HUD_WIDGET_SATCHELS_ID,
                     HUD_WIDGET_GANG_ID,
                     HUD_WIDGET_LEADERBOARD_GIFT_ID,
@@ -64,8 +66,11 @@ public final class CompanionConfig {
     public static final double HUD_WIDGET_WIDTH_MULTIPLIER_MIN = 0.55D;
     public static final double HUD_WIDGET_WIDTH_MULTIPLIER_MAX = 1.35D;
     public static final int PING_VISUAL_DURATION_SECONDS_MIN = 2;
-    public static final int PING_VISUAL_DURATION_SECONDS_MAX = 10;
+    public static final int PING_VISUAL_DURATION_SECONDS_MAX = 15;
     public static final int PING_VISUAL_DURATION_SECONDS_DEFAULT = 5;
+    public static final String PING_VISUAL_MODE_FOLLOW = "follow";
+    public static final String PING_VISUAL_MODE_STATIC = "static";
+    public static final String PING_VISUAL_MODE_DEFAULT = PING_VISUAL_MODE_FOLLOW;
 
     public List<String> allowedServerIds = new ArrayList<>();
     public boolean enablePayloadCodecFallback = false;
@@ -84,6 +89,7 @@ public final class CompanionConfig {
     public List<String> serverSignaturePublicKeys = new ArrayList<>();
     public boolean logMalformedOncePerConnection = true;
     public int pingVisualDurationSeconds = PING_VISUAL_DURATION_SECONDS_DEFAULT;
+    public String pingVisualMode = PING_VISUAL_MODE_DEFAULT;
     public boolean pingParticlesEnabled = true;
 
     public static CompanionConfig defaults() {
@@ -101,6 +107,7 @@ public final class CompanionConfig {
         config.hudEventVisibility = defaultHudEventVisibility();
         config.hudLeaderboardVisibility = defaultHudLeaderboardVisibility();
         config.pingVisualDurationSeconds = PING_VISUAL_DURATION_SECONDS_DEFAULT;
+        config.pingVisualMode = PING_VISUAL_MODE_DEFAULT;
         config.pingParticlesEnabled = true;
         return config;
     }
@@ -253,6 +260,7 @@ public final class CompanionConfig {
         }
         hudLeaderboardVisibility = cleanedHudLeaderboardVisibility;
         pingVisualDurationSeconds = clampPingVisualDurationSeconds(pingVisualDurationSeconds);
+        pingVisualMode = normalizePingVisualMode(pingVisualMode);
     }
 
     public boolean isSignatureVerificationEnforced() {
@@ -294,6 +302,7 @@ public final class CompanionConfig {
         Map<String, HudWidgetPosition> defaults = new LinkedHashMap<>();
         defaults.put(HUD_WIDGET_EVENTS_ID, new HudWidgetPosition(0.03D, 0.08D));
         defaults.put(HUD_WIDGET_COOLDOWNS_ID, new HudWidgetPosition(0.70D, 0.08D));
+        defaults.put(HUD_WIDGET_PETS_ID, new HudWidgetPosition(0.43D, 0.68D));
         defaults.put(HUD_WIDGET_SATCHELS_ID, new HudWidgetPosition(0.70D, 0.68D));
         defaults.put(HUD_WIDGET_GANG_ID, new HudWidgetPosition(0.03D, 0.68D));
         defaults.put(HUD_WIDGET_LEADERBOARD_GIFT_ID, new HudWidgetPosition(0.43D, 0.08D));
@@ -308,6 +317,7 @@ public final class CompanionConfig {
         Map<String, Double> defaults = new LinkedHashMap<>();
         defaults.put(HUD_WIDGET_EVENTS_ID, 0.78D);
         defaults.put(HUD_WIDGET_COOLDOWNS_ID, 0.80D);
+        defaults.put(HUD_WIDGET_PETS_ID, 0.78D);
         defaults.put(HUD_WIDGET_SATCHELS_ID, 0.78D);
         defaults.put(HUD_WIDGET_GANG_ID, 0.76D);
         defaults.put(HUD_WIDGET_LEADERBOARD_GIFT_ID, 0.74D);
@@ -322,6 +332,7 @@ public final class CompanionConfig {
         Map<String, Double> defaults = new LinkedHashMap<>();
         defaults.put(HUD_WIDGET_EVENTS_ID, 0.86D);
         defaults.put(HUD_WIDGET_COOLDOWNS_ID, 1.0D);
+        defaults.put(HUD_WIDGET_PETS_ID, 1.08D);
         defaults.put(HUD_WIDGET_SATCHELS_ID, 1.0D);
         defaults.put(HUD_WIDGET_GANG_ID, 0.92D);
         defaults.put(HUD_WIDGET_LEADERBOARD_GIFT_ID, 0.92D);
@@ -351,6 +362,19 @@ public final class CompanionConfig {
         return Math.max(
                 PING_VISUAL_DURATION_SECONDS_MIN,
                 Math.min(PING_VISUAL_DURATION_SECONDS_MAX, value));
+    }
+
+    public static String normalizePingVisualMode(String value) {
+        if (value == null) {
+            return PING_VISUAL_MODE_DEFAULT;
+        }
+
+        String normalized = value.trim().toLowerCase(Locale.ROOT);
+        if (PING_VISUAL_MODE_STATIC.equals(normalized)) {
+            return PING_VISUAL_MODE_STATIC;
+        }
+
+        return PING_VISUAL_MODE_FOLLOW;
     }
 
     private static Map<String, Boolean> defaultHudEventVisibility() {

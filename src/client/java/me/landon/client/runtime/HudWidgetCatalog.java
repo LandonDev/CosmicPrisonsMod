@@ -55,6 +55,16 @@ public final class HudWidgetCatalog {
                             "Gang/Truce Ping: 15s",
                             "Gang Join: 3m 14s",
                             "Rank Kit Overlord: 1h 20m"));
+    private static final WidgetDescriptor PETS =
+            new WidgetDescriptor(
+                    CompanionConfig.HUD_WIDGET_PETS_ID,
+                    ClientFeatures.HUD_PETS_ID,
+                    "text.cosmicprisonsmod.hud.pets.title",
+                    0x89D56B,
+                    List.of(
+                            "bandit_king|Bandit King Pet|5|1|42|180|600",
+                            "lucky|Lucky Pet|7|2|88|0|0",
+                            "signal_jammer|Signal Jammer Pet|3|1|16|0|85"));
     private static final WidgetDescriptor EVENTS =
             new WidgetDescriptor(
                     CompanionConfig.HUD_WIDGET_EVENTS_ID,
@@ -152,6 +162,7 @@ public final class HudWidgetCatalog {
     private static final List<WidgetDescriptor> WIDGETS =
             List.of(
                     COOLDOWNS,
+                    PETS,
                     EVENTS,
                     SATCHELS,
                     GANG,

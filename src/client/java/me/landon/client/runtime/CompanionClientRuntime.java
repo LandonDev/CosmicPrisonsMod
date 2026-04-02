@@ -1,5 +1,9 @@
 package me.landon.client.runtime;
 
+import com.google.common.collect.LinkedHashMultimap;
+import com.mojang.authlib.GameProfile;
+import com.mojang.authlib.properties.Property;
+import com.mojang.authlib.properties.PropertyMap;
 import it.unimi.dsi.fastutil.ints.Int2LongMap;
 import it.unimi.dsi.fastutil.ints.Int2LongOpenHashMap;
 import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
@@ -25,6 +29,7 @@ import java.util.OptionalDouble;
 import java.util.OptionalLong;
 import java.util.Properties;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Supplier;
@@ -45,6 +50,8 @@ import me.landon.companion.protocol.ProtocolCodec;
 import me.landon.companion.protocol.ProtocolConstants;
 import me.landon.companion.protocol.ProtocolMessage;
 import me.landon.companion.session.ConnectionGateState;
+import net.minecraft.component.DataComponentTypes;
+import net.minecraft.component.type.ProfileComponent;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientWorldEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
@@ -132,6 +139,20 @@ public final class CompanionClientRuntime {
             Pattern.compile("^(\\[[^\\]]+\\])\\s+(?:(\\[[^\\]]+\\])\\s+)?(.+)$");
     private static final Pattern GANG_TRAILING_TIME_PATTERN =
             Pattern.compile("^(.*)\\(([^()]*)\\)\\s*$");
+    private static final Map<String, String> PET_HEAD_TEXTURES =
+            Map.of(
+                    "bandit_king",
+                    "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvM2NkZTkwMTA5OTBiN2NmMDBkNzViYmExMjE0OTZhYjc2ODRjNmNjNGI2MmNmOTI4OTBmMmRiMzlmYmFmZWUwZiJ9fX0=",
+                    "signal_jammer",
+                    "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvNzAwZTJmMjVlMDcyOGU4OTgxZjZiZDNlNDE2NTUzODBlMDBlN2U1NGI3NTU5ZDVmNDczNWU3MzkxY2RmMDJkMiJ9fX0=",
+                    "cleanse",
+                    "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvY2E1MjgwMjY1NzNmM2E0ZDJmMjNjZjM2M2ZkNmU2NTI3NzdiNmVjMTkzYTg0MTRiMWU2NDRkNzhiZjllN2MzIn19fQ==",
+                    "shockwave",
+                    "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvYjZiYjllOGNlMTg5MzBiZDhiNmI5MDM4NzViYjM0YzFjNjkyMTQ2NjJiYWYwMzI0ZDYzMmE3Y2M2MzVhZmM5OSJ9fX0=",
+                    "blacksmith",
+                    "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvMTg3ZmNjY2FlNGM1NmIxOTY5ZTZkY2ZkZDdhOTkyMTY2N2ZmYjNjMjU5NjhjZDE4N2UwZDdiYTQ1YmFlMzdmYiJ9fX0=",
+                    "lucky",
+                    "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvNTE5ZDI4YTg2MzJmYTRkODdjYTE5OWJiYzJlODhjZjM2OGRlZGQ1NTc0NzAxN2FlMzQ4NDM1NjlmN2E2MzRjNSJ9fX0=");
     private static final KeyBinding.Category PING_KEYBIND_CATEGORY =
             KeyBinding.Category.create(Identifier.of(CosmicPrisonsMod.MOD_ID, "pings"));
     private static final int PING_PARTICLE_COLUMN_SEGMENTS = 6;
@@ -141,6 +162,7 @@ public final class CompanionClientRuntime {
     private static final int PING_BEAM_COLOR_COORDS = 0xFFF945FF;
     private static final float PING_BEAM_INNER_RADIUS = 0.2F;
     private static final float PING_BEAM_OUTER_RADIUS = 0.25F;
+    private static final double PING_BEAM_HORIZONTAL_OFFSET = 1.35D;
     private static final int PING_LABEL_TEXT_COLOR_GANG = 0xFFE4F4FF;
     private static final int PING_LABEL_TEXT_COLOR_TRUCE = 0xFFFFEEDB;
     private static final int PING_LABEL_TEXT_COLOR_COORDS = 0xFFA8A8A8;
@@ -158,6 +180,18 @@ public final class CompanionClientRuntime {
     private static final long COORDS_PING_LIFETIME_MILLIS = 5L * 60L * 1000L; // 5 mins
     private static final long PING_FEEDBACK_COOLDOWN_MILLIS = 1500L;
     private static final long UPDATE_CHECK_INTERVAL_MILLIS = 60_000L;
+    private static final int CLIENT_HELLO_MAX_ATTEMPTS = 4;
+    private static final int CLIENT_HELLO_RETRY_INTERVAL_TICKS = 20;
+    private static final int CLIENT_HELLO_CHANNEL_UNAVAILABLE_RETRY_TICKS = 10;
+    private static final int COMPANION_C2S_MAX_PER_SECOND = 8;
+    private static final long COMPANION_C2S_WINDOW_MILLIS = 1000L;
+    private static final long COMPANION_C2S_RATE_LIMIT_WARN_COOLDOWN_MILLIS = 5000L;
+    private static final long COMPANION_DIAGNOSTICS_LOG_INTERVAL_MILLIS = 15_000L;
+    private static final String PACKET_DIAGNOSTICS_PROPERTY = "cosmicprisons.debug.packets";
+    private static final String PACKET_DIAGNOSTICS_ENV = "COSMICPRISONS_DEBUG_PACKETS";
+    private static final boolean PACKET_DIAGNOSTICS_ENABLED =
+            isTruthy(System.getProperty(PACKET_DIAGNOSTICS_PROPERTY))
+                    || isTruthy(System.getenv(PACKET_DIAGNOSTICS_ENV));
     private static final String MOD_RELEASE_MANIFEST_URL =
             "https://github.com/LandonDev/CosmicPrisonsMod/releases/latest/download/cosmic-launcher-manifest.json";
     private static final String LAUNCHER_PROOF_PROPERTY = "cosmicprisons.launcher.proof";
@@ -185,10 +219,16 @@ public final class CompanionClientRuntime {
     private final List<KnownOverlayStack> knownOverlayStacks = new ArrayList<>();
     private final Map<String, Long> eventProgressBaselineSeconds = new LinkedHashMap<>();
     private final Map<String, Long> cooldownProgressBaselineSeconds = new LinkedHashMap<>();
+    private final Map<String, Long> petProgressBaselineSeconds = new LinkedHashMap<>();
+    private final Map<String, ItemStack> petHeadIconCache = new LinkedHashMap<>();
     private final Int2LongMap gangPingVisualExpiryAtMillis = new Int2LongOpenHashMap();
     private final Int2LongMap trucePingVisualExpiryAtMillis = new Int2LongOpenHashMap();
     private final IntSet gangPingVisualSeededIds = new IntOpenHashSet();
     private final IntSet trucePingVisualSeededIds = new IntOpenHashSet();
+    private final Int2ObjectMap<PingVisualAnchorSnapshot> gangPingStaticAnchors =
+            new Int2ObjectOpenHashMap<>();
+    private final Int2ObjectMap<PingVisualAnchorSnapshot> trucePingStaticAnchors =
+            new Int2ObjectOpenHashMap<>();
     private final Int2ObjectMap<PingLabelSnapshot> gangPingLabelSnapshots =
             new Int2ObjectOpenHashMap<>();
     private final Int2ObjectMap<PingLabelSnapshot> trucePingLabelSnapshots =
@@ -201,7 +241,8 @@ public final class CompanionClientRuntime {
 
     private CompanionConfig config;
     private BuildAttestation buildAttestation;
-    private int helloRetryTicks;
+    private int helloRetriesRemaining;
+    private int helloRetryCooldownTicks;
     private boolean helloUnavailableLogged;
     private ConnectionSessionState.ItemOverlayEntry activeCursorOverlayEntry;
     private ItemStack activeCursorOverlayStack = ItemStack.EMPTY;
@@ -209,11 +250,24 @@ public final class CompanionClientRuntime {
     private int pendingCursorOverlayFrames;
     private volatile int activePeacefulMiningTargetEntityId = -1;
     private long lastPingFeedbackAtMillis;
+    private long companionSendWindowStartAtMillis;
+    private int companionSendWindowCount;
+    private long companionSendAttempts;
+    private long companionSendSuccess;
+    private long companionSendBlockedNoPlayer;
+    private long companionSendBlockedTargetServer;
+    private long companionSendBlockedChannelUnavailable;
+    private long companionSendBlockedRateLimit;
+    private long companionSendBlockedEncoding;
+    private long lastCompanionRateLimitWarnAtMillis;
+    private long lastCompanionDiagnosticsLogAtMillis;
     private boolean gangPingKeyWasDown;
     private boolean trucePingKeyWasDown;
     private boolean outdatedNoticeLeftMouseDown;
     private String dismissedOutdatedNoticeLatestVersion = "";
     private boolean initialized;
+
+    private record PingVisualAnchorSnapshot(Vec3d beamBasePos, Vec3d labelAnchorPos) {}
 
     private record PingLabelSnapshot(Vec3d anchorPos, String entityName, float healthValue) {}
 
@@ -570,13 +624,13 @@ public final class CompanionClientRuntime {
         persistGameOptions();
     }
 
-    /** Returns configured local ping visual duration in seconds (2..10). */
+    /** Returns configured local ping visual duration in seconds (2..15). */
     public synchronized int pingVisualDurationSeconds() {
         return CompanionConfig.clampPingVisualDurationSeconds(
                 getConfig().pingVisualDurationSeconds);
     }
 
-    /** Persists local ping visual duration in seconds (2..10). */
+    /** Persists local ping visual duration in seconds (2..15). */
     public synchronized void setPingVisualDurationSeconds(int durationSeconds) {
         CompanionConfig currentConfig = getConfig();
         int clamped = CompanionConfig.clampPingVisualDurationSeconds(durationSeconds);
@@ -587,6 +641,27 @@ public final class CompanionClientRuntime {
         currentConfig.pingVisualDurationSeconds = clamped;
         configManager.save(currentConfig);
         config = currentConfig;
+    }
+
+    /** Returns whether ping visuals stay fixed at the first observed ping location. */
+    public synchronized boolean pingVisualModeStatic() {
+        return CompanionConfig.PING_VISUAL_MODE_STATIC.equals(
+                CompanionConfig.normalizePingVisualMode(getConfig().pingVisualMode));
+    }
+
+    /** Persists whether ping visuals follow the target or remain fixed. */
+    public synchronized void setPingVisualMode(String mode) {
+        CompanionConfig currentConfig = getConfig();
+        String normalizedMode = CompanionConfig.normalizePingVisualMode(mode);
+        if (normalizedMode.equals(
+                CompanionConfig.normalizePingVisualMode(currentConfig.pingVisualMode))) {
+            return;
+        }
+
+        currentConfig.pingVisualMode = normalizedMode;
+        configManager.save(currentConfig);
+        config = currentConfig;
+        clearPingAnchorSnapshots();
     }
 
     /** Returns whether ping particles are enabled in addition to beacon beams. */
@@ -611,9 +686,11 @@ public final class CompanionClientRuntime {
         CompanionConfig currentConfig = getConfig();
         currentConfig.pingVisualDurationSeconds =
                 CompanionConfig.PING_VISUAL_DURATION_SECONDS_DEFAULT;
+        currentConfig.pingVisualMode = CompanionConfig.PING_VISUAL_MODE_DEFAULT;
         currentConfig.pingParticlesEnabled = true;
         configManager.save(currentConfig);
         config = currentConfig;
+        clearPingAnchorSnapshots();
     }
 
     /**
@@ -680,7 +757,7 @@ public final class CompanionClientRuntime {
         ConnectionSessionState.ItemOverlayEntry overlayEntry;
 
         synchronized (this) {
-            if (!shouldRenderInventoryItemOverlays()) {
+            if (!shouldRenderAnyInventoryItemOverlays()) {
                 return;
             }
 
@@ -689,7 +766,7 @@ public final class CompanionClientRuntime {
             overlayEntry = resolveSlotOverlayEntry(slot);
         }
 
-        if (overlayEntry == null) {
+        if (overlayEntry == null || !shouldRenderOverlayType(overlayEntry.overlayType())) {
             return;
         }
 
@@ -712,7 +789,7 @@ public final class CompanionClientRuntime {
         ConnectionSessionState.ItemOverlayEntry overlayEntry;
 
         synchronized (this) {
-            if (!shouldRenderInventoryItemOverlays()) {
+            if (!shouldRenderAnyInventoryItemOverlays()) {
                 clearOverlayRenderCaches();
                 return;
             }
@@ -751,6 +828,11 @@ public final class CompanionClientRuntime {
             }
         }
 
+        if (overlayEntry == null || !shouldRenderOverlayType(overlayEntry.overlayType())) {
+            clearActiveCursorOverlay();
+            return;
+        }
+
         int slotX = mouseX - 8;
         int slotY = mouseY - 8;
         drawOverlayText(drawContext, slotX, slotY, overlayEntry);
@@ -760,7 +842,7 @@ public final class CompanionClientRuntime {
      * Captures the most recent clicked-slot overlay to support cursor-drag rendering across frames.
      */
     public synchronized void rememberHandledScreenSlotClickOverlay(Slot slot) {
-        if (slot == null || !shouldRenderInventoryItemOverlays() || !slot.hasStack()) {
+        if (slot == null || !shouldRenderAnyInventoryItemOverlays() || !slot.hasStack()) {
             return;
         }
 
@@ -770,7 +852,8 @@ public final class CompanionClientRuntime {
             ConnectionSessionState.ItemOverlayEntry knownOverlayEntry =
                     findKnownOverlayForStack(slot.getStack());
 
-            if (knownOverlayEntry == null) {
+            if (knownOverlayEntry == null
+                    || !shouldRenderOverlayType(knownOverlayEntry.overlayType())) {
                 clearActiveCursorOverlay();
                 return;
             }
@@ -783,7 +866,7 @@ public final class CompanionClientRuntime {
         ConnectionSessionState.ItemOverlayEntry overlayEntry =
                 session.getInventoryItemOverlay(slotIndex);
 
-        if (overlayEntry == null) {
+        if (overlayEntry == null || !shouldRenderOverlayType(overlayEntry.overlayType())) {
             clearActiveCursorOverlay();
             return;
         }
@@ -797,10 +880,10 @@ public final class CompanionClientRuntime {
         clearPingVisualTracking();
         clearOverlayRenderCaches();
         clearActivePeacefulMiningTarget();
+        resetCompanionSendDiagnostics();
         gangPingKeyWasDown = false;
         trucePingKeyWasDown = false;
-        helloRetryTicks = ProtocolConstants.CLIENT_HELLO_RETRY_TICKS;
-        helloUnavailableLogged = false;
+        initializeHelloRetryState();
         attemptSendClientHello(client);
     }
 
@@ -811,8 +894,7 @@ public final class CompanionClientRuntime {
         clearActivePeacefulMiningTarget();
         gangPingKeyWasDown = false;
         trucePingKeyWasDown = false;
-        helloRetryTicks = 0;
-        helloUnavailableLogged = false;
+        disableHelloRetryState();
     }
 
     private synchronized void onEndTick(MinecraftClient client) {
@@ -825,10 +907,18 @@ public final class CompanionClientRuntime {
         processPingKeybinds(client);
         emitPingBeaconParticles(client);
 
-        if (!session.helloSent() && helloRetryTicks > 0 && isCompanionTargetServer(client)) {
-            helloRetryTicks--;
+        if (helloRetryCooldownTicks > 0) {
+            helloRetryCooldownTicks--;
+        }
+
+        if (!session.helloSent()
+                && helloRetriesRemaining > 0
+                && helloRetryCooldownTicks <= 0
+                && isCompanionTargetServer(client)) {
             attemptSendClientHello(client);
         }
+
+        maybeLogCompanionPacketDiagnostics(client);
     }
 
     private synchronized void onWorldChange(MinecraftClient client, ClientWorld world) {
@@ -841,7 +931,7 @@ public final class CompanionClientRuntime {
         clearOverlayRenderCaches();
         clearActivePeacefulMiningTarget();
 
-        if (world == null) {
+        if (world == null || client.player == null) {
             return;
         }
 
@@ -849,8 +939,7 @@ public final class CompanionClientRuntime {
             session.reset();
         }
 
-        helloRetryTicks = ProtocolConstants.CLIENT_HELLO_RETRY_TICKS;
-        helloUnavailableLogged = false;
+        initializeHelloRetryState();
         attemptSendClientHello(client);
     }
 
@@ -1484,7 +1573,7 @@ public final class CompanionClientRuntime {
         Map<Integer, ConnectionSessionState.ItemOverlayEntry> overlaySnapshot;
 
         synchronized (this) {
-            if (!shouldRenderInventoryItemOverlays()) {
+            if (!shouldRenderAnyInventoryItemOverlays()) {
                 return;
             }
 
@@ -1498,7 +1587,7 @@ public final class CompanionClientRuntime {
         for (int slot = PLAYER_STORAGE_MIN_SLOT; slot <= HOTBAR_MAX_SLOT; slot++) {
             ConnectionSessionState.ItemOverlayEntry overlayEntry = overlaySnapshot.get(slot);
 
-            if (overlayEntry == null) {
+            if (overlayEntry == null || !shouldRenderOverlayType(overlayEntry.overlayType())) {
                 continue;
             }
 
@@ -1529,13 +1618,16 @@ public final class CompanionClientRuntime {
 
         boolean hasEventsPanel = false;
         boolean hasCooldownPanel = false;
+        boolean hasPetsPanel = false;
         for (HudWidgetPanel panel : panels) {
             if (CompanionConfig.HUD_WIDGET_EVENTS_ID.equals(panel.widgetId())) {
                 hasEventsPanel = true;
             } else if (CompanionConfig.HUD_WIDGET_COOLDOWNS_ID.equals(panel.widgetId())) {
                 hasCooldownPanel = true;
+            } else if (CompanionConfig.HUD_WIDGET_PETS_ID.equals(panel.widgetId())) {
+                hasPetsPanel = true;
             }
-            if (hasEventsPanel && hasCooldownPanel) {
+            if (hasEventsPanel && hasCooldownPanel && hasPetsPanel) {
                 break;
             }
         }
@@ -1544,6 +1636,9 @@ public final class CompanionClientRuntime {
         }
         if (!hasCooldownPanel) {
             cooldownProgressBaselineSeconds.clear();
+        }
+        if (!hasPetsPanel) {
+            petProgressBaselineSeconds.clear();
         }
 
         for (HudWidgetPanel panel : panels) {
@@ -2057,6 +2152,8 @@ public final class CompanionClientRuntime {
         if (CompanionConfig.HUD_WIDGET_COOLDOWNS_ID.equals(panel.widgetId())) {
             drawCooldownRows(
                     drawContext, textRenderer, panel, contentLeft, contentTop, contentRight);
+        } else if (CompanionConfig.HUD_WIDGET_PETS_ID.equals(panel.widgetId())) {
+            drawPetRows(drawContext, textRenderer, panel, contentLeft, contentTop, contentRight);
         } else if (CompanionConfig.HUD_WIDGET_EVENTS_ID.equals(panel.widgetId())) {
             if (panel.compactMode()) {
                 drawEventRowsCompact(
@@ -2155,6 +2252,99 @@ public final class CompanionClientRuntime {
 
         if (!seenKeys.isEmpty()) {
             cooldownProgressBaselineSeconds.keySet().retainAll(seenKeys);
+        }
+    }
+
+    private void drawPetRows(
+            DrawContext drawContext,
+            TextRenderer textRenderer,
+            HudWidgetPanel panel,
+            int contentLeft,
+            int contentTop,
+            int contentRight) {
+        Set<String> seenKeys = new HashSet<>();
+        int rowY = contentTop;
+        for (String line : panel.lines()) {
+            PetWidgetRow petRow = parsePetWidgetRow(line);
+            if (petRow == null) {
+                rowY += panel.lineHeight();
+                continue;
+            }
+
+            if (petRow.overflow()) {
+                String overflowText =
+                        textRenderer.trimToWidth(
+                                petRow.displayName(),
+                                Math.max(8, contentRight - contentLeft - 2));
+                drawContext.drawTextWithShadow(
+                        textRenderer, overflowText, contentLeft + 1, rowY + 7, 0xFF9CB0C8);
+                rowY += panel.lineHeight();
+                continue;
+            }
+
+            int iconLeft = contentLeft;
+            int iconTop = centeredItemTop(rowY, panel.lineHeight());
+            int labelX = iconLeft + 20;
+            String levelText = petLevelText(petRow);
+            String xpText = petLevelProgressText(petRow);
+            int rightColumnWidth =
+                    Math.max(textRenderer.getWidth(levelText), textRenderer.getWidth(xpText));
+            int rightColumnX = Math.max(contentLeft + 92, contentRight - rightColumnWidth);
+            int labelMaxWidth = Math.max(10, rightColumnX - labelX - 6);
+
+            drawContext.drawItem(resolvePetHudHeadStack(petRow.petKey(), petRow.displayName()), iconLeft, iconTop);
+
+            String primaryLabel = textRenderer.trimToWidth(petPrimaryLabel(petRow), labelMaxWidth);
+            drawContext.drawTextWithShadow(textRenderer, primaryLabel, labelX, rowY + 1, 0xFFEAF2FF);
+            drawContext.drawTextWithShadow(
+                    textRenderer,
+                    levelText,
+                    rightColumnX,
+                    rowY + 1,
+                    0xFFDCE7F8);
+            drawContext.drawTextWithShadow(
+                    textRenderer,
+                    xpText,
+                    rightColumnX,
+                    rowY + 11,
+                    petLevelProgressColor(petRow));
+
+            if (petRow.statusSeconds() <= 0L) {
+                drawContext.drawTextWithShadow(
+                        textRenderer, "READY", labelX, rowY + 11, 0xFF7CF2A0);
+            } else {
+                String progressKey = normalizePetProgressKey(petRow);
+                if (!progressKey.isBlank()) {
+                    seenKeys.add(progressKey);
+                }
+                float progress = petProgressForRow(progressKey, petRow.statusSeconds());
+                String statusText = petStatusText(petRow);
+                int statusColor = petStatusColor(petRow);
+                int barX = labelX;
+                int barY = rowY + panel.lineHeight() - 4;
+                int barWidth = Math.max(12, rightColumnX - barX - 6);
+                drawContext.drawTextWithShadow(
+                        textRenderer,
+                        statusText,
+                        barX,
+                        rowY + 11,
+                        statusColor);
+                drawContext.fill(
+                        barX, barY, barX + barWidth, barY + 2, withAlpha(0x31415C, 190));
+                int filled = Math.max(0, Math.min(barWidth, Math.round(barWidth * progress)));
+                if (filled > 0) {
+                    drawContext.fill(
+                            barX, barY, barX + filled, barY + 2, withAlpha(statusColor, 240));
+                }
+            }
+
+            rowY += panel.lineHeight();
+        }
+
+        if (seenKeys.isEmpty()) {
+            petProgressBaselineSeconds.clear();
+        } else {
+            petProgressBaselineSeconds.keySet().retainAll(seenKeys);
         }
     }
 
@@ -2595,6 +2785,10 @@ public final class CompanionClientRuntime {
             return 22;
         }
 
+        if (CompanionConfig.HUD_WIDGET_PETS_ID.equals(widgetId)) {
+            return 24;
+        }
+
         if (CompanionConfig.HUD_WIDGET_SATCHELS_ID.equals(widgetId)) {
             if (compactEvents) {
                 return 10;
@@ -2629,6 +2823,10 @@ public final class CompanionClientRuntime {
             return 148;
         }
 
+        if (CompanionConfig.HUD_WIDGET_PETS_ID.equals(widgetId)) {
+            return 170;
+        }
+
         if (CompanionConfig.HUD_WIDGET_SATCHELS_ID.equals(widgetId)) {
             if (compactEvents) {
                 return 94;
@@ -2660,6 +2858,9 @@ public final class CompanionClientRuntime {
         }
         if (CompanionConfig.HUD_WIDGET_SATCHELS_ID.equals(widgetId) && compactEvents) {
             return 62;
+        }
+        if (CompanionConfig.HUD_WIDGET_PETS_ID.equals(widgetId)) {
+            return 140;
         }
         if (CompanionConfig.HUD_WIDGET_GANG_ID.equals(widgetId)) {
             return 112;
@@ -2704,6 +2905,29 @@ public final class CompanionClientRuntime {
                 int labelWidth = textRenderer.getWidth(compactCooldownLabel(parsedLine.label()));
                 int valueWidth = textRenderer.getWidth(compactStatusText(parsedLine.value(), true));
                 int width = Math.max(labelWidth, valueWidth) + 30;
+                max = Math.max(max, width);
+                continue;
+            }
+
+            if (CompanionConfig.HUD_WIDGET_PETS_ID.equals(widgetId)) {
+                PetWidgetRow petRow = parsePetWidgetRow(line);
+                if (petRow == null) {
+                    max = Math.max(max, textRenderer.getWidth(line) + 18);
+                    continue;
+                }
+
+                if (petRow.overflow()) {
+                    max = Math.max(max, textRenderer.getWidth(petRow.displayName()) + 18);
+                    continue;
+                }
+
+                int primaryWidth = textRenderer.getWidth(petPrimaryLabel(petRow));
+                int detailWidth =
+                        Math.max(
+                                textRenderer.getWidth(petLevelText(petRow)),
+                                textRenderer.getWidth(petLevelProgressText(petRow)));
+                int statusWidth = textRenderer.getWidth(petStatusText(petRow));
+                int width = Math.max(primaryWidth, statusWidth) + detailWidth + 34;
                 max = Math.max(max, width);
                 continue;
             }
@@ -2978,6 +3202,9 @@ public final class CompanionClientRuntime {
 
     private static Item cooldownIcon(String label) {
         String normalized = normalizeStatusToken(label);
+        if (normalized.contains(" pet")) {
+            return Items.BONE;
+        }
         if (normalized.contains("ping")) {
             return Items.BEACON;
         }
@@ -3008,6 +3235,77 @@ public final class CompanionClientRuntime {
             return Items.AMETHYST_SHARD;
         }
         return Items.CLOCK;
+    }
+
+    private static Item petIcon(String petKey, String displayName) {
+        String normalized =
+                normalizeStatusToken(
+                        petKey == null || petKey.isBlank() ? displayName : petKey);
+        return switch (normalized) {
+            case "bandit_king", "bandit king", "bandit_king pet", "bandit king pet" ->
+                    Items.IRON_SWORD;
+            case "signal_jammer", "signal jammer", "signal_jammer pet", "signal jammer pet" ->
+                    Items.REDSTONE;
+            case "cleanse", "cleanse pet" -> Items.MILK_BUCKET;
+            case "shockwave", "shockwave pet" -> Items.WIND_CHARGE;
+            case "blacksmith", "blacksmith pet" -> Items.ANVIL;
+            case "lucky", "lucky pet" -> Items.GOLD_INGOT;
+            case "overflow" -> Items.PAPER;
+            default -> Items.BONE;
+        };
+    }
+
+    private ItemStack resolvePetHudHeadStack(String petKey, String displayName) {
+        String normalized = normalizePetTextureKey(petKey, displayName);
+        ItemStack cached = petHeadIconCache.get(normalized);
+        if (cached != null) {
+            return cached;
+        }
+
+        String textureValue = PET_HEAD_TEXTURES.get(normalized);
+        ItemStack resolved =
+                textureValue == null
+                        ? new ItemStack(petIcon(petKey, displayName))
+                        : buildPetHeadStack(
+                                normalized,
+                                displayName == null || displayName.isBlank()
+                                        ? humanizePetKey(normalized)
+                                        : displayName,
+                                textureValue);
+        petHeadIconCache.put(normalized, resolved);
+        return resolved;
+    }
+
+    private static String normalizePetTextureKey(String petKey, String displayName) {
+        String base = petKey;
+        if (base == null || base.isBlank()) {
+            base = displayName;
+        }
+        if (base == null || base.isBlank()) {
+            return "";
+        }
+
+        String normalized = base.trim().toLowerCase(java.util.Locale.ROOT);
+        if (normalized.endsWith(" pet")) {
+            normalized = normalized.substring(0, normalized.length() - 4).trim();
+        }
+        return normalized.replace(' ', '_');
+    }
+
+    private static ItemStack buildPetHeadStack(
+            String petKey, String displayName, String textureValue) {
+        ItemStack stack = new ItemStack(Items.PLAYER_HEAD);
+        var properties = LinkedHashMultimap.<String, Property>create();
+        properties.put("textures", new Property("textures", textureValue));
+        GameProfile profile =
+                new GameProfile(
+                        UUID.nameUUIDFromBytes(
+                                ("cosmicprisons.pethud." + petKey)
+                                        .getBytes(StandardCharsets.UTF_8)),
+                        displayName,
+                        new PropertyMap(properties));
+        stack.set(DataComponentTypes.PROFILE, ProfileComponent.ofStatic(profile));
+        return stack;
     }
 
     private static Item satchelIcon(String label) {
@@ -3047,6 +3345,180 @@ public final class CompanionClientRuntime {
 
     private static int centeredItemTop(int rowY, int rowHeight) {
         return rowY + Math.max(0, (rowHeight - 16) / 2) + 1;
+    }
+
+    private static PetWidgetRow parsePetWidgetRow(String rawLine) {
+        if (rawLine == null || rawLine.isBlank()) {
+            return null;
+        }
+
+        String[] parts = rawLine.split("\\|", -1);
+        if (parts.length < 7) {
+            return new PetWidgetRow("", rawLine.trim(), 0, 0, 0, 0L, 0L, true);
+        }
+
+        String petKey = parts[0].trim();
+        if ("overflow".equalsIgnoreCase(petKey)) {
+            String displayName = parts[1] == null ? "" : parts[1].trim();
+            return new PetWidgetRow("overflow", displayName, 0, 0, 0, 0L, 0L, true);
+        }
+
+        String displayName = parts[1] == null ? "" : parts[1].trim();
+        if (displayName.isBlank()) {
+            displayName = humanizePetKey(petKey);
+        }
+
+        return new PetWidgetRow(
+                petKey,
+                displayName,
+                parsePositiveInt(parts[2], 1),
+                parsePositiveInt(parts[3], 1),
+                parsePositiveInt(parts[4], 0),
+                parseNonNegativeLong(parts[5]),
+                parseNonNegativeLong(parts[6]),
+                false);
+    }
+
+    private static String petPrimaryLabel(PetWidgetRow petRow) {
+        String label = petRow.displayName();
+        if (petRow.count() > 1) {
+            label += " x" + petRow.count();
+        }
+        return label;
+    }
+
+    private static String petLevelText(PetWidgetRow petRow) {
+        return "Lv " + Math.max(1, petRow.level());
+    }
+
+    private static String petLevelProgressText(PetWidgetRow petRow) {
+        if (petRow.levelProgressPercent() >= 100) {
+            return "MAX";
+        }
+        return Math.max(0, Math.min(100, petRow.levelProgressPercent())) + "%";
+    }
+
+    private static int petLevelProgressColor(PetWidgetRow petRow) {
+        if (petRow.levelProgressPercent() >= 100) {
+            return 0xFFBFE7FF;
+        }
+        return 0xFFF1D37A;
+    }
+
+    private static String petStatusText(PetWidgetRow petRow) {
+        if (petRow.activeRemainingSeconds() > 0L) {
+            return "UP " + formatWidgetDurationSeconds(petRow.activeRemainingSeconds());
+        }
+        if (petRow.cooldownRemainingSeconds() > 0L) {
+            return "CD " + formatWidgetDurationSeconds(petRow.cooldownRemainingSeconds());
+        }
+        return "READY";
+    }
+
+    private static int petStatusColor(PetWidgetRow petRow) {
+        if (petRow.activeRemainingSeconds() > 0L) {
+            return 0xFF89F1B3;
+        }
+        if (petRow.cooldownRemainingSeconds() > 0L) {
+            return 0xFFFFC17B;
+        }
+        return 0xFF7CF2A0;
+    }
+
+    private static String normalizePetProgressKey(PetWidgetRow petRow) {
+        if (petRow == null || petRow.overflow()) {
+            return "";
+        }
+        return (petRow.petKey() + ":" + petRow.level() + ":" + petRow.levelProgressPercent())
+                .trim()
+                .toLowerCase(java.util.Locale.ROOT);
+    }
+
+    private float petProgressForRow(String progressKey, long remainingSeconds) {
+        if (progressKey == null || progressKey.isBlank()) {
+            return 0.0F;
+        }
+
+        if (remainingSeconds <= 0L) {
+            petProgressBaselineSeconds.remove(progressKey);
+            return 1.0F;
+        }
+
+        long baseline = petProgressBaselineSeconds.getOrDefault(progressKey, remainingSeconds);
+        if (remainingSeconds > baseline) {
+            baseline = remainingSeconds;
+        }
+        petProgressBaselineSeconds.put(progressKey, baseline);
+
+        if (baseline <= 0L) {
+            return 0.0F;
+        }
+
+        return clamp01(1.0F - (remainingSeconds / (float) baseline));
+    }
+
+    private static String formatWidgetDurationSeconds(long totalSeconds) {
+        long safeSeconds = Math.max(0L, totalSeconds);
+        long days = safeSeconds / 86_400L;
+        long hours = (safeSeconds % 86_400L) / 3_600L;
+        long minutes = (safeSeconds % 3_600L) / 60L;
+        long seconds = safeSeconds % 60L;
+
+        if (days > 0L) {
+            return hours > 0L ? days + "d " + hours + "h" : days + "d";
+        }
+        if (hours > 0L) {
+            return minutes > 0L ? hours + "h " + minutes + "m" : hours + "h";
+        }
+        if (minutes > 0L) {
+            return seconds > 0L ? minutes + "m " + seconds + "s" : minutes + "m";
+        }
+        return seconds + "s";
+    }
+
+    private static int parsePositiveInt(String rawValue, int fallback) {
+        try {
+            return Math.max(fallback, Integer.parseInt(rawValue == null ? "" : rawValue.trim()));
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
+    }
+
+    private static long parseNonNegativeLong(String rawValue) {
+        try {
+            return Math.max(0L, Long.parseLong(rawValue == null ? "" : rawValue.trim()));
+        } catch (NumberFormatException ignored) {
+            return 0L;
+        }
+    }
+
+    private static String humanizePetKey(String petKey) {
+        if (petKey == null || petKey.isBlank()) {
+            return "Pet";
+        }
+
+        String[] parts = petKey.trim().split("[_\\s]+");
+        StringBuilder builder = new StringBuilder();
+        for (String part : parts) {
+            if (part == null || part.isBlank()) {
+                continue;
+            }
+            if (builder.length() > 0) {
+                builder.append(' ');
+            }
+            builder.append(Character.toUpperCase(part.charAt(0)));
+            if (part.length() > 1) {
+                builder.append(part.substring(1).toLowerCase(java.util.Locale.ROOT));
+            }
+        }
+
+        if (builder.length() == 0) {
+            return "Pet";
+        }
+        if (!builder.toString().endsWith(" Pet")) {
+            builder.append(" Pet");
+        }
+        return builder.toString();
     }
 
     private static GangLayout buildGangLayout(List<String> lines) {
@@ -3926,6 +4398,10 @@ public final class CompanionClientRuntime {
             return;
         }
 
+        RenderTickCounter renderTickCounter = client.getRenderTickCounter();
+        float tickProgress =
+                renderTickCounter == null ? 0.0F : renderTickCounter.getTickProgress(false);
+        boolean staticMode = pingVisualModeStatic();
         long now = System.currentTimeMillis();
         IntSet gangVisualIds =
                 resolveActivePingVisualIds(
@@ -3941,9 +4417,21 @@ public final class CompanionClientRuntime {
                         now);
 
         renderPingBeaconParticles(
-                client.world, gangVisualIds, ParticleTypes.SOUL_FIRE_FLAME, ParticleTypes.END_ROD);
+                client.world,
+                gangVisualIds,
+                gangPingStaticAnchors,
+                tickProgress,
+                staticMode,
+                ParticleTypes.SOUL_FIRE_FLAME,
+                ParticleTypes.END_ROD);
         renderPingBeaconParticles(
-                client.world, truceVisualIds, ParticleTypes.FLAME, ParticleTypes.SMALL_FLAME);
+                client.world,
+                truceVisualIds,
+                trucePingStaticAnchors,
+                tickProgress,
+                staticMode,
+                ParticleTypes.FLAME,
+                ParticleTypes.SMALL_FLAME);
     }
 
     private synchronized void onWorldRenderEndMain(WorldRenderContext context) {
@@ -3966,6 +4454,7 @@ public final class CompanionClientRuntime {
         float beamRotationDegrees =
                 (float) Math.floorMod(client.world.getTime(), 40L) + tickProgress;
         Vec3d cameraPos = client.gameRenderer.getCamera().getCameraPos();
+        boolean staticMode = pingVisualModeStatic();
         long now = System.currentTimeMillis();
 
         renderPingBeaconBeams(
@@ -3992,17 +4481,21 @@ public final class CompanionClientRuntime {
                 context,
                 client.world,
                 gangEntityIds,
+                gangPingStaticAnchors,
                 cameraPos,
                 tickProgress,
                 beamRotationDegrees,
+                staticMode,
                 PING_BEAM_COLOR_GANG);
         renderPingBeaconBeams(
                 context,
                 client.world,
                 truceEntityIds,
+                trucePingStaticAnchors,
                 cameraPos,
                 tickProgress,
                 beamRotationDegrees,
+                staticMode,
                 PING_BEAM_COLOR_TRUCE);
     }
 
@@ -4010,27 +4503,30 @@ public final class CompanionClientRuntime {
             WorldRenderContext context,
             ClientWorld world,
             IntSet entityIds,
+            Int2ObjectMap<PingVisualAnchorSnapshot> staticAnchors,
             Vec3d cameraPos,
             float tickProgress,
             float beamRotationDegrees,
+            boolean staticMode,
             int beamColor) {
         var matrices = context.matrices();
         var commandQueue = context.commandQueue();
+        prunePingVisualAnchorSnapshots(staticAnchors, entityIds);
 
         for (int entityId : entityIds) {
-            Entity entity = world.getEntityById(entityId);
-
-            if (entity == null || entity.isRemoved()) {
+            PingVisualAnchorSnapshot anchorSnapshot =
+                    resolvePingVisualAnchorSnapshot(
+                            world, entityId, staticAnchors, tickProgress, staticMode);
+            if (anchorSnapshot == null) {
                 continue;
             }
 
-            Vec3d entityPos = entity.getLerpedPos(tickProgress);
-            double beamBaseY = entityPos.y + 0.1D;
+            Vec3d beamBasePos = anchorSnapshot.beamBasePos();
             matrices.push();
             matrices.translate(
-                    entityPos.x - cameraPos.x - 0.5D,
-                    beamBaseY - cameraPos.y,
-                    entityPos.z - cameraPos.z - 0.5D);
+                    beamBasePos.x - cameraPos.x - 0.5D,
+                    beamBasePos.y - cameraPos.y,
+                    beamBasePos.z - cameraPos.z - 0.5D);
             BeaconBlockEntityRenderer.renderBeam(
                     matrices,
                     commandQueue,
@@ -4113,6 +4609,7 @@ public final class CompanionClientRuntime {
         }
 
         float tickProgress = tickCounter == null ? 0.0F : tickCounter.getTickProgress(false);
+        boolean staticMode = pingVisualModeStatic();
         long now = System.currentTimeMillis();
         IntSet gangEntityIds =
                 resolveActivePingVisualIds(
@@ -4132,9 +4629,11 @@ public final class CompanionClientRuntime {
                 drawContext,
                 client,
                 gangEntityIds,
+                gangPingStaticAnchors,
                 gangPingLabelSnapshots,
                 renderedEntityIds,
                 tickProgress,
+                staticMode,
                 PING_LABEL_TEXT_COLOR_GANG,
                 PING_LABEL_DISTANCE_COLOR_GANG,
                 PING_LABEL_FRAME_COLOR_GANG,
@@ -4143,9 +4642,11 @@ public final class CompanionClientRuntime {
                 drawContext,
                 client,
                 truceEntityIds,
+                trucePingStaticAnchors,
                 trucePingLabelSnapshots,
                 renderedEntityIds,
                 tickProgress,
+                staticMode,
                 PING_LABEL_TEXT_COLOR_TRUCE,
                 PING_LABEL_DISTANCE_COLOR_TRUCE,
                 PING_LABEL_FRAME_COLOR_TRUCE,
@@ -4156,9 +4657,11 @@ public final class CompanionClientRuntime {
             DrawContext drawContext,
             MinecraftClient client,
             IntSet entityIds,
+            Int2ObjectMap<PingVisualAnchorSnapshot> staticAnchors,
             Int2ObjectMap<PingLabelSnapshot> labelSnapshots,
             IntSet renderedEntityIds,
             float tickProgress,
+            boolean staticMode,
             int textColor,
             int distanceColor,
             int frameColor,
@@ -4176,6 +4679,7 @@ public final class CompanionClientRuntime {
                                 client.gameRenderer.getCamera().getPitch(),
                                 client.gameRenderer.getCamera().getYaw())
                         .normalize();
+        prunePingVisualAnchorSnapshots(staticAnchors, entityIds);
         prunePingLabelSnapshots(labelSnapshots, entityIds);
 
         for (int entityId : entityIds) {
@@ -4185,21 +4689,22 @@ public final class CompanionClientRuntime {
 
             Entity entity = world.getEntityById(entityId);
             PingLabelSnapshot snapshot;
+            PingVisualAnchorSnapshot anchorSnapshot =
+                    resolvePingVisualAnchorSnapshot(
+                            world, entityId, staticAnchors, tickProgress, staticMode);
             if (entity == null || entity.isRemoved()) {
                 snapshot = labelSnapshots.get(entityId);
                 if (snapshot == null) {
                     continue;
                 }
             } else {
-                Vec3d entityPos = entity.getLerpedPos(tickProgress);
+                if (anchorSnapshot == null || anchorSnapshot.labelAnchorPos() == null) {
+                    continue;
+                }
+
                 snapshot =
                         new PingLabelSnapshot(
-                                new Vec3d(
-                                        entityPos.x,
-                                        entityPos.y
-                                                + entity.getHeight()
-                                                + PING_LABEL_VERTICAL_OFFSET,
-                                        entityPos.z),
+                                anchorSnapshot.labelAnchorPos(),
                                 entity.getName().getString(),
                                 resolveEntityHealth(entity));
                 labelSnapshots.put(entityId, snapshot);
@@ -4422,34 +4927,41 @@ public final class CompanionClientRuntime {
     private static void renderPingBeaconParticles(
             ClientWorld world,
             IntSet entityIds,
+            Int2ObjectMap<PingVisualAnchorSnapshot> staticAnchors,
+            float tickProgress,
+            boolean staticMode,
             ParticleEffect coreParticle,
             ParticleEffect orbitParticle) {
+        prunePingVisualAnchorSnapshots(staticAnchors, entityIds);
         for (int entityId : entityIds) {
-            Entity entity = world.getEntityById(entityId);
-
-            if (entity == null || entity.isRemoved()) {
+            PingVisualAnchorSnapshot anchorSnapshot =
+                    resolvePingVisualAnchorSnapshot(
+                            world, entityId, staticAnchors, tickProgress, staticMode);
+            if (anchorSnapshot == null) {
                 continue;
             }
 
-            spawnPingBeaconParticles(world, entity, coreParticle, orbitParticle);
+            spawnPingBeaconParticles(
+                    world, anchorSnapshot.beamBasePos(), entityId, coreParticle, orbitParticle);
         }
     }
 
     private static void spawnPingBeaconParticles(
             ClientWorld world,
-            Entity entity,
+            Vec3d beamBasePos,
+            int entitySeed,
             ParticleEffect coreParticle,
             ParticleEffect orbitParticle) {
-        double baseX = entity.getX();
-        double baseY = entity.getY() + 0.3D;
-        double baseZ = entity.getZ();
+        double baseX = beamBasePos.x;
+        double baseY = beamBasePos.y + 0.2D;
+        double baseZ = beamBasePos.z;
 
         for (int segment = 0; segment < PING_PARTICLE_COLUMN_SEGMENTS; segment++) {
             double y = baseY + (segment * 0.42D);
             world.addImportantParticleClient(coreParticle, baseX, y, baseZ, 0.0D, 0.012D, 0.0D);
 
             double radius = 0.2D + (segment * 0.025D);
-            double angle = (world.getTime() * 0.22D) + (segment * 1.17D) + (entity.getId() * 0.13D);
+            double angle = (world.getTime() * 0.22D) + (segment * 1.17D) + (entitySeed * 0.13D);
             double orbitX = baseX + (Math.cos(angle) * radius);
             double orbitZ = baseZ + (Math.sin(angle) * radius);
             world.addParticleClient(orbitParticle, orbitX, y, orbitZ, 0.0D, 0.01D, 0.0D);
@@ -4459,8 +4971,89 @@ public final class CompanionClientRuntime {
         world.addImportantParticleClient(orbitParticle, baseX, topY, baseZ, 0.0D, 0.02D, 0.0D);
     }
 
+    private static PingVisualAnchorSnapshot resolvePingVisualAnchorSnapshot(
+            ClientWorld world,
+            int entityId,
+            Int2ObjectMap<PingVisualAnchorSnapshot> staticAnchors,
+            float tickProgress,
+            boolean staticMode) {
+        if (entityId < 0) {
+            return null;
+        }
+
+        if (staticMode) {
+            PingVisualAnchorSnapshot existingSnapshot = staticAnchors.get(entityId);
+            if (existingSnapshot != null) {
+                return existingSnapshot;
+            }
+        }
+
+        Entity entity = world.getEntityById(entityId);
+        if (entity == null || entity.isRemoved()) {
+            return staticMode ? staticAnchors.get(entityId) : null;
+        }
+
+        PingVisualAnchorSnapshot liveSnapshot =
+                createPingVisualAnchorSnapshot(entity, tickProgress);
+        if (liveSnapshot != null && staticMode) {
+            staticAnchors.put(entityId, liveSnapshot);
+        }
+        return liveSnapshot;
+    }
+
+    private static PingVisualAnchorSnapshot createPingVisualAnchorSnapshot(
+            Entity entity, float tickProgress) {
+        Vec3d entityPos = entity.getLerpedPos(tickProgress);
+        if (entityPos == null || !entityPos.isFinite()) {
+            return null;
+        }
+
+        Vec3d sideOffset = computePingBeamHorizontalOffset(entity);
+        if (!sideOffset.isFinite()) {
+            return null;
+        }
+
+        Vec3d beamBasePos =
+                new Vec3d(
+                        entityPos.x + sideOffset.x, entityPos.y + 0.1D, entityPos.z + sideOffset.z);
+        Vec3d labelAnchorPos =
+                new Vec3d(
+                        entityPos.x + sideOffset.x,
+                        entityPos.y + entity.getHeight() + PING_LABEL_VERTICAL_OFFSET,
+                        entityPos.z + sideOffset.z);
+        if (!beamBasePos.isFinite() || !labelAnchorPos.isFinite()) {
+            return null;
+        }
+
+        return new PingVisualAnchorSnapshot(beamBasePos, labelAnchorPos);
+    }
+
+    private static Vec3d computePingBeamHorizontalOffset(Entity entity) {
+        Vec3d forward = Vec3d.fromPolar(0.0F, entity.getYaw());
+        Vec3d side = new Vec3d(-forward.z, 0.0D, forward.x);
+        if (!side.isFinite() || side.lengthSquared() < 1.0E-6D) {
+            return new Vec3d(PING_BEAM_HORIZONTAL_OFFSET, 0.0D, 0.0D);
+        }
+
+        return side.normalize().multiply(PING_BEAM_HORIZONTAL_OFFSET);
+    }
+
+    private static void prunePingVisualAnchorSnapshots(
+            Int2ObjectMap<PingVisualAnchorSnapshot> anchorSnapshots, IntSet activeEntityIds) {
+        var iterator = anchorSnapshots.keySet().iterator();
+        while (iterator.hasNext()) {
+            int entityId = iterator.nextInt();
+            if (!activeEntityIds.contains(entityId)) {
+                iterator.remove();
+            }
+        }
+    }
+
     private synchronized void attemptSendClientHello(MinecraftClient client) {
-        if (session.helloSent() || client.player == null) {
+        if (session.helloSent()
+                || client.player == null
+                || helloRetriesRemaining <= 0
+                || helloRetryCooldownTicks > 0) {
             return;
         }
 
@@ -4473,10 +5066,13 @@ public final class CompanionClientRuntime {
                 helloUnavailableLogged = true;
                 LOGGER.debug("ClientHello postponed because channel cannot send yet");
             }
+            helloRetryCooldownTicks =
+                    Math.max(helloRetryCooldownTicks, CLIENT_HELLO_CHANNEL_UNAVAILABLE_RETRY_TICKS);
             return;
         }
 
         helloUnavailableLogged = false;
+        helloRetriesRemaining--;
         String clientVersionPayload =
                 launcherProofProvider.applyTo(buildAttestation.asStructuredClientVersion());
         ProtocolMessage.ClientHelloC2S hello =
@@ -4484,20 +5080,153 @@ public final class CompanionClientRuntime {
                         clientVersionPayload, CLIENT_CAPABILITIES_BITSET);
         if (sendC2S(hello)) {
             session.markHelloSent();
+            disableHelloRetryState();
+            return;
+        }
+
+        if (helloRetriesRemaining > 0) {
+            helloRetryCooldownTicks = CLIENT_HELLO_RETRY_INTERVAL_TICKS;
         }
     }
 
     private synchronized boolean sendC2S(ProtocolMessage message) {
         MinecraftClient client = MinecraftClient.getInstance();
-        if (client.player == null
-                || !isCompanionTargetServer(client)
-                || !ClientPlayNetworking.canSend(CompanionRawPayload.ID)) {
+        companionSendAttempts++;
+
+        if (client.player == null) {
+            companionSendBlockedNoPlayer++;
             return false;
         }
 
-        byte[] bytes = protocolCodec.encode(message);
-        ClientPlayNetworking.send(new CompanionRawPayload(bytes));
+        if (!isCompanionTargetServer(client)) {
+            companionSendBlockedTargetServer++;
+            return false;
+        }
+
+        if (!ClientPlayNetworking.canSend(CompanionRawPayload.ID)) {
+            companionSendBlockedChannelUnavailable++;
+            return false;
+        }
+
+        long now = System.currentTimeMillis();
+        if (!consumeCompanionSendPermit(now)) {
+            companionSendBlockedRateLimit++;
+            maybeLogCompanionRateLimit(now, client, message);
+            return false;
+        }
+
+        try {
+            byte[] bytes = protocolCodec.encode(message);
+            ClientPlayNetworking.send(new CompanionRawPayload(bytes));
+            companionSendSuccess++;
+            return true;
+        } catch (RuntimeException ex) {
+            companionSendBlockedEncoding++;
+            LOGGER.warn(
+                    "Failed to send companion payload messageType={}",
+                    message.getClass().getSimpleName(),
+                    ex);
+            return false;
+        }
+    }
+
+    private void initializeHelloRetryState() {
+        helloRetriesRemaining = CLIENT_HELLO_MAX_ATTEMPTS;
+        helloRetryCooldownTicks = 0;
+        helloUnavailableLogged = false;
+    }
+
+    private void disableHelloRetryState() {
+        helloRetriesRemaining = 0;
+        helloRetryCooldownTicks = 0;
+        helloUnavailableLogged = false;
+    }
+
+    private void resetCompanionSendDiagnostics() {
+        companionSendWindowStartAtMillis = 0L;
+        companionSendWindowCount = 0;
+        companionSendAttempts = 0L;
+        companionSendSuccess = 0L;
+        companionSendBlockedNoPlayer = 0L;
+        companionSendBlockedTargetServer = 0L;
+        companionSendBlockedChannelUnavailable = 0L;
+        companionSendBlockedRateLimit = 0L;
+        companionSendBlockedEncoding = 0L;
+        lastCompanionRateLimitWarnAtMillis = 0L;
+        lastCompanionDiagnosticsLogAtMillis = 0L;
+    }
+
+    private boolean consumeCompanionSendPermit(long nowMillis) {
+        if (companionSendWindowStartAtMillis <= 0L
+                || (nowMillis - companionSendWindowStartAtMillis) >= COMPANION_C2S_WINDOW_MILLIS) {
+            companionSendWindowStartAtMillis = nowMillis;
+            companionSendWindowCount = 0;
+        }
+
+        if (companionSendWindowCount >= COMPANION_C2S_MAX_PER_SECOND) {
+            return false;
+        }
+
+        companionSendWindowCount++;
         return true;
+    }
+
+    private void maybeLogCompanionRateLimit(
+            long nowMillis, MinecraftClient client, ProtocolMessage message) {
+        if ((nowMillis - lastCompanionRateLimitWarnAtMillis)
+                < COMPANION_C2S_RATE_LIMIT_WARN_COOLDOWN_MILLIS) {
+            return;
+        }
+
+        lastCompanionRateLimitWarnAtMillis = nowMillis;
+        LOGGER.warn(
+                "Companion packet rate-limit active server={} messageType={} windowCount={} windowMs={}",
+                resolveCurrentServerAddress(client),
+                message.getClass().getSimpleName(),
+                companionSendWindowCount,
+                COMPANION_C2S_WINDOW_MILLIS);
+    }
+
+    private void maybeLogCompanionPacketDiagnostics(MinecraftClient client) {
+        if (!PACKET_DIAGNOSTICS_ENABLED) {
+            return;
+        }
+
+        long now = System.currentTimeMillis();
+        if ((now - lastCompanionDiagnosticsLogAtMillis)
+                < COMPANION_DIAGNOSTICS_LOG_INTERVAL_MILLIS) {
+            return;
+        }
+
+        lastCompanionDiagnosticsLogAtMillis = now;
+        LOGGER.info(
+                "Companion packet diagnostics server={} attempts={} sent={} blockedNoPlayer={} blockedTarget={} blockedChannel={} blockedRateLimit={} blockedEncoding={} helloSent={} helloRetriesRemaining={} helloCooldownTicks={}",
+                resolveCurrentServerAddress(client),
+                companionSendAttempts,
+                companionSendSuccess,
+                companionSendBlockedNoPlayer,
+                companionSendBlockedTargetServer,
+                companionSendBlockedChannelUnavailable,
+                companionSendBlockedRateLimit,
+                companionSendBlockedEncoding,
+                session.helloSent(),
+                helloRetriesRemaining,
+                helloRetryCooldownTicks);
+    }
+
+    private static String resolveCurrentServerAddress(MinecraftClient client) {
+        if (client == null) {
+            return "unknown";
+        }
+
+        ServerInfo currentServer = client.getCurrentServerEntry();
+        if (currentServer == null
+                || currentServer.address == null
+                || currentServer.address.isBlank()) {
+            return "unknown";
+        }
+
+        return currentServer.address;
     }
 
     private boolean isCompanionTargetServer(MinecraftClient client) {
@@ -4574,6 +5303,22 @@ public final class CompanionClientRuntime {
         }
 
         return normalized;
+    }
+
+    private static boolean isTruthy(String rawValue) {
+        if (rawValue == null) {
+            return false;
+        }
+
+        String normalized = rawValue.trim();
+        if (normalized.isEmpty()) {
+            return false;
+        }
+
+        return "1".equals(normalized)
+                || "true".equalsIgnoreCase(normalized)
+                || "yes".equalsIgnoreCase(normalized)
+                || "on".equalsIgnoreCase(normalized);
     }
 
     private synchronized void logMalformedOncePerConnection(BinaryDecodingException ex) {
@@ -4653,10 +5398,26 @@ public final class CompanionClientRuntime {
         return (session.serverFeatureFlags() & requiredBit) != 0;
     }
 
-    private boolean shouldRenderInventoryItemOverlays() {
+    private boolean shouldRenderAnyInventoryItemOverlays() {
         return session.gateState().isEnabled()
                 && session.inventoryItemOverlaysSupported()
-                && getFeatureToggleState(ClientFeatures.INVENTORY_ITEM_OVERLAYS_ID);
+                && (getFeatureToggleState(ClientFeatures.INVENTORY_ITEM_OVERLAYS_ID)
+                        || getFeatureToggleState(ClientFeatures.HUD_PETS_ID));
+    }
+
+    private boolean shouldRenderOverlayType(int overlayType) {
+        if (!session.gateState().isEnabled() || !session.inventoryItemOverlaysSupported()) {
+            return false;
+        }
+
+        return isPetOverlayType(overlayType)
+                ? getFeatureToggleState(ClientFeatures.HUD_PETS_ID)
+                : getFeatureToggleState(ClientFeatures.INVENTORY_ITEM_OVERLAYS_ID);
+    }
+
+    private static boolean isPetOverlayType(int overlayType) {
+        return overlayType == ProtocolConstants.OVERLAY_TYPE_PET_ACTIVE
+                || overlayType == ProtocolConstants.OVERLAY_TYPE_PET_COOLDOWN;
     }
 
     private boolean shouldRenderWidget(String featureId) {
@@ -4752,6 +5513,12 @@ public final class CompanionClientRuntime {
         trucePingVisualExpiryAtMillis.clear();
         gangPingVisualSeededIds.clear();
         trucePingVisualSeededIds.clear();
+        clearPingAnchorSnapshots();
+    }
+
+    private void clearPingAnchorSnapshots() {
+        gangPingStaticAnchors.clear();
+        trucePingStaticAnchors.clear();
         gangPingLabelSnapshots.clear();
         trucePingLabelSnapshots.clear();
     }
@@ -4830,6 +5597,8 @@ public final class CompanionClientRuntime {
             case ProtocolConstants.OVERLAY_TYPE_MONEY_NOTE -> 0xFF84F08F;
             case ProtocolConstants.OVERLAY_TYPE_GANG_POINT_NOTE -> 0xFFFFC659;
             case ProtocolConstants.OVERLAY_TYPE_SATCHEL_PERCENT -> 0xFFB5E86C;
+            case ProtocolConstants.OVERLAY_TYPE_PET_ACTIVE -> 0xFF8BF5C2;
+            case ProtocolConstants.OVERLAY_TYPE_PET_COOLDOWN -> 0xFFFFB27D;
             default -> 0xFFE6E6E6;
         };
     }
@@ -4840,6 +5609,8 @@ public final class CompanionClientRuntime {
             case ProtocolConstants.OVERLAY_TYPE_MONEY_NOTE -> 0xA01B3C25;
             case ProtocolConstants.OVERLAY_TYPE_GANG_POINT_NOTE -> 0xA04A361A;
             case ProtocolConstants.OVERLAY_TYPE_SATCHEL_PERCENT -> 0xA0284A1E;
+            case ProtocolConstants.OVERLAY_TYPE_PET_ACTIVE -> 0xA01D4733;
+            case ProtocolConstants.OVERLAY_TYPE_PET_COOLDOWN -> 0xA04E2A1B;
             default -> 0xA0333333;
         };
     }
@@ -5251,6 +6022,23 @@ public final class CompanionClientRuntime {
     private record GangLayout(List<GangPrimaryLine> primaryLines, List<String> metadataLines) {}
 
     private record GangPrimaryLine(String text, int section, boolean header) {}
+
+    private record PetWidgetRow(
+            String petKey,
+            String displayName,
+            int level,
+            int count,
+            int levelProgressPercent,
+            long activeRemainingSeconds,
+            long cooldownRemainingSeconds,
+            boolean overflow) {
+        private long statusSeconds() {
+            if (activeRemainingSeconds > 0L) {
+                return activeRemainingSeconds;
+            }
+            return cooldownRemainingSeconds;
+        }
+    }
 
     private record LeaderboardCandidate(
             HudWidgetCatalog.WidgetDescriptor descriptor, List<String> lines) {}

@@ -34,6 +34,8 @@ public final class ProtocolConstants {
     public static final int OVERLAY_TYPE_MONEY_NOTE = 2;
     public static final int OVERLAY_TYPE_GANG_POINT_NOTE = 3;
     public static final int OVERLAY_TYPE_SATCHEL_PERCENT = 4;
+    public static final int OVERLAY_TYPE_PET_ACTIVE = 5;
+    public static final int OVERLAY_TYPE_PET_COOLDOWN = 6;
     public static final int CLIENT_HELLO_RETRY_TICKS = 60;
 
     private ProtocolConstants() {}

@@ -42,6 +42,16 @@ public final class ClientFeatures {
                     true,
                     OptionalInt.of(ProtocolConstants.SERVER_FEATURE_HUD_WIDGETS));
 
+    public static final String HUD_PETS_ID = "hud_pets";
+    public static final ClientFeatureDefinition HUD_PETS =
+            new ClientFeatureDefinition(
+                    HUD_PETS_ID,
+                    "text.cosmicprisonsmod.feature.hud_pets.name",
+                    "text.cosmicprisonsmod.feature.hud_pets.icon",
+                    "text.cosmicprisonsmod.feature.hud_pets.description",
+                    true,
+                    OptionalInt.of(ProtocolConstants.SERVER_FEATURE_HUD_WIDGETS));
+
     public static final String HUD_EVENTS_ID = "hud_events";
     public static final ClientFeatureDefinition HUD_EVENTS =
             new ClientFeatureDefinition(
@@ -97,6 +107,7 @@ public final class ClientFeatures {
                     PEACEFUL_MINING,
                     INVENTORY_ITEM_OVERLAYS,
                     HUD_COOLDOWNS,
+                    HUD_PETS,
                     HUD_EVENTS,
                     HUD_SATCHEL_DISPLAY,
                     HUD_GANG,
