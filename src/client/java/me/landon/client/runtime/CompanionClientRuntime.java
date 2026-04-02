@@ -50,8 +50,6 @@ import me.landon.companion.protocol.ProtocolCodec;
 import me.landon.companion.protocol.ProtocolConstants;
 import me.landon.companion.protocol.ProtocolMessage;
 import me.landon.companion.session.ConnectionGateState;
-import net.minecraft.component.DataComponentTypes;
-import net.minecraft.component.type.ProfileComponent;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientWorldEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
@@ -76,6 +74,8 @@ import net.minecraft.client.render.RenderTickCounter;
 import net.minecraft.client.render.block.entity.BeaconBlockEntityRenderer;
 import net.minecraft.client.util.InputUtil;
 import net.minecraft.client.world.ClientWorld;
+import net.minecraft.component.DataComponentTypes;
+import net.minecraft.component.type.ProfileComponent;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.player.PlayerInventory;
@@ -2274,8 +2274,7 @@ public final class CompanionClientRuntime {
             if (petRow.overflow()) {
                 String overflowText =
                         textRenderer.trimToWidth(
-                                petRow.displayName(),
-                                Math.max(8, contentRight - contentLeft - 2));
+                                petRow.displayName(), Math.max(8, contentRight - contentLeft - 2));
                 drawContext.drawTextWithShadow(
                         textRenderer, overflowText, contentLeft + 1, rowY + 7, 0xFF9CB0C8);
                 rowY += panel.lineHeight();
@@ -2292,22 +2291,18 @@ public final class CompanionClientRuntime {
             int rightColumnX = Math.max(contentLeft + 92, contentRight - rightColumnWidth);
             int labelMaxWidth = Math.max(10, rightColumnX - labelX - 6);
 
-            drawContext.drawItem(resolvePetHudHeadStack(petRow.petKey(), petRow.displayName()), iconLeft, iconTop);
+            drawContext.drawItem(
+                    resolvePetHudHeadStack(petRow.petKey(), petRow.displayName()),
+                    iconLeft,
+                    iconTop);
 
             String primaryLabel = textRenderer.trimToWidth(petPrimaryLabel(petRow), labelMaxWidth);
-            drawContext.drawTextWithShadow(textRenderer, primaryLabel, labelX, rowY + 1, 0xFFEAF2FF);
             drawContext.drawTextWithShadow(
-                    textRenderer,
-                    levelText,
-                    rightColumnX,
-                    rowY + 1,
-                    0xFFDCE7F8);
+                    textRenderer, primaryLabel, labelX, rowY + 1, 0xFFEAF2FF);
             drawContext.drawTextWithShadow(
-                    textRenderer,
-                    xpText,
-                    rightColumnX,
-                    rowY + 11,
-                    petLevelProgressColor(petRow));
+                    textRenderer, levelText, rightColumnX, rowY + 1, 0xFFDCE7F8);
+            drawContext.drawTextWithShadow(
+                    textRenderer, xpText, rightColumnX, rowY + 11, petLevelProgressColor(petRow));
 
             if (petRow.statusSeconds() <= 0L) {
                 drawContext.drawTextWithShadow(
@@ -2324,13 +2319,8 @@ public final class CompanionClientRuntime {
                 int barY = rowY + panel.lineHeight() - 4;
                 int barWidth = Math.max(12, rightColumnX - barX - 6);
                 drawContext.drawTextWithShadow(
-                        textRenderer,
-                        statusText,
-                        barX,
-                        rowY + 11,
-                        statusColor);
-                drawContext.fill(
-                        barX, barY, barX + barWidth, barY + 2, withAlpha(0x31415C, 190));
+                        textRenderer, statusText, barX, rowY + 11, statusColor);
+                drawContext.fill(barX, barY, barX + barWidth, barY + 2, withAlpha(0x31415C, 190));
                 int filled = Math.max(0, Math.min(barWidth, Math.round(barWidth * progress)));
                 if (filled > 0) {
                     drawContext.fill(
@@ -3239,8 +3229,7 @@ public final class CompanionClientRuntime {
 
     private static Item petIcon(String petKey, String displayName) {
         String normalized =
-                normalizeStatusToken(
-                        petKey == null || petKey.isBlank() ? displayName : petKey);
+                normalizeStatusToken(petKey == null || petKey.isBlank() ? displayName : petKey);
         return switch (normalized) {
             case "bandit_king", "bandit king", "bandit_king pet", "bandit king pet" ->
                     Items.IRON_SWORD;

@@ -19,6 +19,7 @@ public class ClientChatInteraction {
 
     /**
      * Called by the ChatHud#addMessage mixin to modify the text before it is displayed to the user.
+     *
      * @param text The original text that was going to be shown to the user
      * @return The modified text that will actually be shown to the user
      */
