@@ -82,6 +82,7 @@ public final class CompanionConfig {
     public boolean hudSatchelsCompactMode = false;
     public boolean hudLeaderboardsCompactMode = false;
     public boolean hudLeaderboardsCycleMode = true;
+    public boolean petItemTimerEnabled = true;
     public Map<String, Boolean> hudEventVisibility = new LinkedHashMap<>();
     public Map<String, Boolean> hudLeaderboardVisibility = new LinkedHashMap<>();
     public String serverSignaturePolicy = SIGNATURE_POLICY_LOG_ONLY;
@@ -104,6 +105,7 @@ public final class CompanionConfig {
         config.hudSatchelsCompactMode = false;
         config.hudLeaderboardsCompactMode = false;
         config.hudLeaderboardsCycleMode = true;
+        config.petItemTimerEnabled = true;
         config.hudEventVisibility = defaultHudEventVisibility();
         config.hudLeaderboardVisibility = defaultHudLeaderboardVisibility();
         config.pingVisualDurationSeconds = PING_VISUAL_DURATION_SECONDS_DEFAULT;
