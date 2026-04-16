@@ -419,6 +419,18 @@ public final class CompanionClientRuntime {
         config = currentConfig;
     }
 
+    public synchronized boolean isPetItemTimerEnabled() {
+        return getConfig().petItemTimerEnabled;
+    }
+
+    /** Enables/disables the countdown overlay drawn on pet items in the inventory. */
+    public synchronized void setPetItemTimerEnabled(boolean enabled) {
+        CompanionConfig currentConfig = getConfig();
+        currentConfig.petItemTimerEnabled = enabled;
+        configManager.save(currentConfig);
+        config = currentConfig;
+    }
+
     public synchronized boolean isHudLeaderboardsCycleMode() {
         return getConfig().hudLeaderboardsCycleMode;
     }
@@ -5388,10 +5400,15 @@ public final class CompanionClientRuntime {
     }
 
     private boolean shouldRenderAnyInventoryItemOverlays() {
-        return session.gateState().isEnabled()
-                && session.inventoryItemOverlaysSupported()
-                && (getFeatureToggleState(ClientFeatures.INVENTORY_ITEM_OVERLAYS_ID)
-                        || getFeatureToggleState(ClientFeatures.HUD_PETS_ID));
+        if (!session.gateState().isEnabled() || !session.inventoryItemOverlaysSupported()) {
+            return false;
+        }
+
+        if (getFeatureToggleState(ClientFeatures.INVENTORY_ITEM_OVERLAYS_ID)) {
+            return true;
+        }
+
+        return getFeatureToggleState(ClientFeatures.HUD_PETS_ID) && getConfig().petItemTimerEnabled;
     }
 
     private boolean shouldRenderOverlayType(int overlayType) {
@@ -5399,9 +5416,12 @@ public final class CompanionClientRuntime {
             return false;
         }
 
-        return isPetOverlayType(overlayType)
-                ? getFeatureToggleState(ClientFeatures.HUD_PETS_ID)
-                : getFeatureToggleState(ClientFeatures.INVENTORY_ITEM_OVERLAYS_ID);
+        if (isPetOverlayType(overlayType)) {
+            return getFeatureToggleState(ClientFeatures.HUD_PETS_ID)
+                    && getConfig().petItemTimerEnabled;
+        }
+
+        return getFeatureToggleState(ClientFeatures.INVENTORY_ITEM_OVERLAYS_ID);
     }
 
     private static boolean isPetOverlayType(int overlayType) {

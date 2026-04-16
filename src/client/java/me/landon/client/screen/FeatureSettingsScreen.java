@@ -1038,6 +1038,13 @@ public final class FeatureSettingsScreen extends Screen {
         if (ClientFeatures.HUD_PETS_ID.equals(featureId)) {
             return List.of(
                     new PopupActionDefinition(
+                            "text.cosmicprisonsmod.settings.popup.action.display_modes",
+                            () -> {
+                                if (client != null) {
+                                    client.setScreen(new HudPetsSettingsScreen(runtime, this));
+                                }
+                            }),
+                    new PopupActionDefinition(
                             "text.cosmicprisonsmod.settings.popup.action.hud_layout",
                             this::openHudLayoutEditor));
         }
