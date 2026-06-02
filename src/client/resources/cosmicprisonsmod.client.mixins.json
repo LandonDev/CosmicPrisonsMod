@@ -6,7 +6,6 @@
   "client": [
     "ClickableCoordinatesMixin",
     "CoordsClickHandlingMixin",
-    "CustomPayloadCodecFallbackMixin",
     "EquipmentRendererPeacefulMiningGhostMixin",
     "GameRendererPeacefulMiningMixin",
     "HandledScreenItemOverlayMixin",

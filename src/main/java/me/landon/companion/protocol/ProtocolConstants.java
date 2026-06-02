@@ -1,9 +1,6 @@
 package me.landon.companion.protocol;
 
-import net.minecraft.util.Identifier;
-
 public final class ProtocolConstants {
-    public static final Identifier CHANNEL_ID = Identifier.of("servercompanion", "main");
     public static final int PROTOCOL_VERSION = 1;
 
     public static final int MAX_PACKET_BYTES = 16 * 1024;

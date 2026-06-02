@@ -44,7 +44,6 @@ import me.landon.companion.attestation.BuildAttestationLoader;
 import me.landon.companion.attestation.SignatureVerifier;
 import me.landon.companion.config.CompanionConfig;
 import me.landon.companion.config.CompanionConfigManager;
-import me.landon.companion.network.CompanionRawPayload;
 import me.landon.companion.protocol.BinaryDecodingException;
 import me.landon.companion.protocol.ProtocolCodec;
 import me.landon.companion.protocol.ProtocolConstants;
@@ -279,31 +278,16 @@ public final class CompanionClientRuntime {
     private CompanionClientRuntime() {}
 
     /**
-     * Initializes the runtime once and registers all client event listeners.
+     * Legacy Server Companion runtime is intentionally disabled.
      *
-     * <p>This must be called from the Fabric client entrypoint only.
+     * <p>The active mod network path is {@code cosmicapi:main}. This method remains only so older
+     * UI/render helper references do not accidentally re-enable the old custom payload channel.
      */
     public synchronized void initializeClient() {
         if (initialized) {
             return;
         }
-
-        config = configManager.load();
-        buildAttestation = buildAttestationLoader.load(resolveModVersion());
-        ensureFeatureDefaultsPersisted();
-        initializePingKeybinds();
-
-        ClientPlayNetworking.registerGlobalReceiver(
-                CompanionRawPayload.ID, this::onPayloadReceived);
-        ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> onJoin(client));
-        ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> onDisconnect());
-        ClientTickEvents.END_CLIENT_TICK.register(this::onEndTick);
-        ClientWorldEvents.AFTER_CLIENT_WORLD_CHANGE.register(this::onWorldChange);
-        ScreenEvents.AFTER_INIT.register(this::onScreenAfterInit);
-        WorldRenderEvents.END_MAIN.register(this::onWorldRenderEndMain);
-
-        HudRenderCallback.EVENT.register(this::renderHud);
-
+        LOGGER.info("Legacy Server Companion runtime disabled; using Cosmic API runtime");
         initialized = true;
     }
 
@@ -961,13 +945,6 @@ public final class CompanionClientRuntime {
                                         button -> client.setScreen(new FeatureSettingsScreen(this)))
                                 .dimensions(buttonX, buttonY, buttonWidth, buttonHeight)
                                 .build());
-    }
-
-    private void onPayloadReceived(
-            CompanionRawPayload payload, ClientPlayNetworking.Context context) {
-        byte[] payloadBytes = payload.payloadBytes();
-        MinecraftClient client = context.client();
-        client.execute(() -> onPayloadReceivedOnClient(payloadBytes, client));
     }
 
     private synchronized void onPayloadReceivedOnClient(
@@ -5039,84 +5016,13 @@ public final class CompanionClientRuntime {
     }
 
     private synchronized void attemptSendClientHello(MinecraftClient client) {
-        if (session.helloSent()
-                || client.player == null
-                || helloRetriesRemaining <= 0
-                || helloRetryCooldownTicks > 0) {
-            return;
-        }
-
-        if (!isCompanionTargetServer(client)) {
-            return;
-        }
-
-        if (!ClientPlayNetworking.canSend(CompanionRawPayload.ID)) {
-            if (!helloUnavailableLogged) {
-                helloUnavailableLogged = true;
-                LOGGER.debug("ClientHello postponed because channel cannot send yet");
-            }
-            helloRetryCooldownTicks =
-                    Math.max(helloRetryCooldownTicks, CLIENT_HELLO_CHANNEL_UNAVAILABLE_RETRY_TICKS);
-            return;
-        }
-
-        helloUnavailableLogged = false;
-        helloRetriesRemaining--;
-        String clientVersionPayload =
-                launcherProofProvider.applyTo(buildAttestation.asStructuredClientVersion());
-        ProtocolMessage.ClientHelloC2S hello =
-                new ProtocolMessage.ClientHelloC2S(
-                        clientVersionPayload, CLIENT_CAPABILITIES_BITSET);
-        if (sendC2S(hello)) {
-            session.markHelloSent();
-            disableHelloRetryState();
-            return;
-        }
-
-        if (helloRetriesRemaining > 0) {
-            helloRetryCooldownTicks = CLIENT_HELLO_RETRY_INTERVAL_TICKS;
-        }
+        disableHelloRetryState();
     }
 
     private synchronized boolean sendC2S(ProtocolMessage message) {
-        MinecraftClient client = MinecraftClient.getInstance();
         companionSendAttempts++;
-
-        if (client.player == null) {
-            companionSendBlockedNoPlayer++;
-            return false;
-        }
-
-        if (!isCompanionTargetServer(client)) {
-            companionSendBlockedTargetServer++;
-            return false;
-        }
-
-        if (!ClientPlayNetworking.canSend(CompanionRawPayload.ID)) {
-            companionSendBlockedChannelUnavailable++;
-            return false;
-        }
-
-        long now = System.currentTimeMillis();
-        if (!consumeCompanionSendPermit(now)) {
-            companionSendBlockedRateLimit++;
-            maybeLogCompanionRateLimit(now, client, message);
-            return false;
-        }
-
-        try {
-            byte[] bytes = protocolCodec.encode(message);
-            ClientPlayNetworking.send(new CompanionRawPayload(bytes));
-            companionSendSuccess++;
-            return true;
-        } catch (RuntimeException ex) {
-            companionSendBlockedEncoding++;
-            LOGGER.warn(
-                    "Failed to send companion payload messageType={}",
-                    message.getClass().getSimpleName(),
-                    ex);
-            return false;
-        }
+        companionSendBlockedChannelUnavailable++;
+        return false;
     }
 
     private void initializeHelloRetryState() {
@@ -5435,12 +5341,7 @@ public final class CompanionClientRuntime {
     }
 
     private boolean canSendPingIntent(MinecraftClient client) {
-        return client != null
-                && client.player != null
-                && session.gateState().isEnabled()
-                && getFeatureToggleState(ClientFeatures.PINGS_ID)
-                && isFeatureSupportedByServer(ClientFeatures.PINGS_ID)
-                && ClientPlayNetworking.canSend(CompanionRawPayload.ID);
+        return false;
     }
 
     private void maybeSendPingUnavailableFeedback(MinecraftClient client) {

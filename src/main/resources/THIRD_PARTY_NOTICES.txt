@@ -1,0 +1,10 @@
+This mod distribution bundles a nested copy of Plasmo Voice for Fabric.
+
+Bundled component:
+- Plasmo Voice 2.1.8 for Fabric 1.21.11
+- Source: https://github.com/plasmoapp/plasmo-voice
+- Release asset: https://github.com/plasmoapp/plasmo-voice/releases/download/2.1.8/plasmovoice-fabric-1.21.11-2.1.8.jar
+- License declared by upstream: LGPL-3.0
+
+The bundled Plasmo Voice jar is loaded by Fabric Loader as a nested mod alongside
+CosmicPrisonsMod. Upstream ownership and licensing remain with the Plasmo Voice authors.

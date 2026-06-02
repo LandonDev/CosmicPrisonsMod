@@ -4,11 +4,33 @@ plugins {
     id 'com.diffplug.spotless' version '6.25.0'
 }
 
+import java.security.MessageDigest
+
 version = project.mod_version
 group = project.maven_group
 
 base {
     archivesName = project.archives_base_name
+}
+
+def plasmoVoiceVersion = '2.1.8'
+def plasmoVoiceJarName = "plasmovoice-fabric-${project.minecraft_version}-${plasmoVoiceVersion}.jar"
+def plasmoVoiceDownloadUrl = "https://github.com/plasmoapp/plasmo-voice/releases/download/${plasmoVoiceVersion}/${plasmoVoiceJarName}"
+def plasmoVoiceSha256 = '39d6b7996609196365efe57654d4340be9dc132cf5355dc16d5a8ad2d426a965'
+def plasmoVoiceJarFile = layout.buildDirectory.file("downloaded-mods/${plasmoVoiceJarName}")
+
+String sha256(File file) {
+    MessageDigest digest = MessageDigest.getInstance('SHA-256')
+    file.withInputStream { input ->
+        byte[] buffer = new byte[8192]
+        int read
+
+        while ((read = input.read(buffer)) != -1) {
+            digest.update(buffer, 0, read)
+        }
+    }
+
+    return digest.digest().encodeHex().toString()
 }
 
 loom {
@@ -26,6 +48,70 @@ repositories {
 }
 
 def lunarModsDir = file("${System.getProperty('user.home')}/.lunarclient/profiles/lunar/1.21/mods/fabric-1.21.11")
+def runModsDir = file("$projectDir/run/mods")
+
+tasks.register('downloadPlasmoVoice') {
+    outputs.file(plasmoVoiceJarFile)
+
+    doLast {
+        File target = plasmoVoiceJarFile.get().asFile
+        target.parentFile.mkdirs()
+
+        boolean needsDownload = !target.exists()
+        if (!needsDownload) {
+            needsDownload = sha256(target) != plasmoVoiceSha256
+        }
+
+        if (needsDownload) {
+            logger.lifecycle('Downloading {} from {}', plasmoVoiceJarName, plasmoVoiceDownloadUrl)
+
+            target.delete()
+            new URL(plasmoVoiceDownloadUrl).withInputStream { input ->
+                target.withOutputStream { output ->
+                    output << input
+                }
+            }
+        }
+
+        String actualSha256 = sha256(target)
+        if (actualSha256 != plasmoVoiceSha256) {
+            throw new GradleException("Unexpected SHA-256 for ${target.name}: ${actualSha256}")
+        }
+    }
+}
+
+tasks.register('syncPlasmoVoiceToRunMods') {
+    dependsOn(tasks.named('downloadPlasmoVoice'))
+    inputs.file(plasmoVoiceJarFile)
+    outputs.file(new File(runModsDir, plasmoVoiceJarName))
+
+    doLast {
+        runModsDir.mkdirs()
+        runModsDir.listFiles()?.findAll { File candidate ->
+            String lower = candidate.name.toLowerCase(java.util.Locale.ROOT)
+            lower.startsWith('plasmovoice-fabric-') && lower.endsWith('.jar')
+        }?.each { File oldJar ->
+            if (oldJar.name != plasmoVoiceJarName && !oldJar.delete()) {
+                logger.warn('Could not delete old Plasmo Voice dev jar: {}', oldJar)
+            }
+        }
+
+        copy {
+            from(plasmoVoiceJarFile)
+            into(runModsDir)
+        }
+    }
+}
+
+tasks.matching { it.name == 'runClient' }.configureEach {
+    dependsOn(tasks.named('syncPlasmoVoiceToRunMods'))
+}
+
+tasks.named('remapJar', net.fabricmc.loom.task.RemapJarTask).configure {
+    dependsOn(tasks.named('downloadPlasmoVoice'))
+    addNestedDependencies = true
+    nestedJars.from(plasmoVoiceJarFile)
+}
 
 tasks.register('installToLunarMods') {
     dependsOn(tasks.named('remapJar'))

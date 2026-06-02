@@ -1,6 +1,6 @@
 {
   "key.category.cosmicprisonsmod.pings": "Pins",
-  "text.cosmicprisonsmod.server_not_allowed": "Companion blocked: serverId '%s' is not in allowedServerIds",
+  "text.cosmicprisonsmod.server_not_allowed": "Cosmic API blocked: serverId '%s' is not in allowedServerIds",
   "text.cosmicprisonsmod.settings.title": "Cosmic Prisons Mod Settings",
   "text.cosmicprisonsmod.settings.subtitle": "Toggle modules, inspect details, and reposition every HUD from one place.",
   "text.cosmicprisonsmod.settings.button.open": "Mod Settings",
@@ -71,7 +71,7 @@
   "text.cosmicprisonsmod.feature.pings.bind.gang": "Gang Key: %s",
   "text.cosmicprisonsmod.feature.pings.bind.truce": "Truce Key: %s",
   "text.cosmicprisonsmod.feature.pings.bind_hint": "Click a key button, then press a key. ESC cancels.",
-  "text.cosmicprisonsmod.pings.unavailable.handshake": "Pings unavailable: companion handshake is not active.",
+  "text.cosmicprisonsmod.pings.unavailable.handshake": "Pings unavailable: Cosmic API session is not active.",
   "text.cosmicprisonsmod.pings.unavailable.disabled": "Pings are disabled in Mod Settings.",
   "text.cosmicprisonsmod.pings.unavailable.unsupported": "Pings unavailable: server has not enabled ping support.",
   "text.cosmicprisonsmod.pings.unavailable.channel": "Pings unavailable: network channel is not ready.",
@@ -137,5 +137,5 @@
   "key.cosmicprisonsmod.ping.gang": "Gang Ping",
   "key.cosmicprisonsmod.ping.truce": "Truce Ping",
   "key.categories.cosmicprisonsmod.pings": "Cosmic Prisons Pings",
-  "category.cosmicprisonsmod": "Cosmic Prisons Companion"
+  "category.cosmicprisonsmod": "Cosmic Prisons Official Mod"
 }
