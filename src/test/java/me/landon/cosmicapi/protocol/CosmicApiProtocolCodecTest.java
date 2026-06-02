@@ -53,7 +53,8 @@ class CosmicApiProtocolCodecTest {
                 {"type":"resolve","event":"session_resolved","allowed":true,"sessionId":"sess_api","reason":"ok","allowedScopes":["events:read","player.profile:read"],"allowedHooks":["server.event.changed"]}
                 """;
 
-        CosmicApiServerMessage message = codec.decodeServerMessage(json.getBytes(StandardCharsets.UTF_8));
+        CosmicApiServerMessage message =
+                codec.decodeServerMessage(json.getBytes(StandardCharsets.UTF_8));
 
         assertEquals("resolve", message.type());
         assertEquals("session_resolved", message.event());

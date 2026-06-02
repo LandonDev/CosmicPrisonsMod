@@ -188,7 +188,8 @@ public final class CosmicApiProtocolCodec {
                 case 't' -> builder.append('\t');
                 case 'u' -> {
                     if (index + 4 <= json.length()) {
-                        builder.append((char) Integer.parseInt(json.substring(index, index + 4), 16));
+                        builder.append(
+                                (char) Integer.parseInt(json.substring(index, index + 4), 16));
                         index += 4;
                     }
                 }

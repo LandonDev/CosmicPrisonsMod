@@ -77,7 +77,8 @@ public final class CosmicApiClientRuntime {
         attemptSendClientHello(client);
     }
 
-    private void onPayloadReceived(CosmicApiRawPayload payload, ClientPlayNetworking.Context context) {
+    private void onPayloadReceived(
+            CosmicApiRawPayload payload, ClientPlayNetworking.Context context) {
         CosmicApiServerMessage message;
         try {
             message = protocolCodec.decodeServerMessage(payload.payloadBytes());
@@ -126,7 +127,8 @@ public final class CosmicApiClientRuntime {
             CosmicApiClientHello hello =
                     CosmicApiClientHello.official(
                             resolveInstallId(), resolveMinecraftVersion(), resolveModVersion());
-            ClientPlayNetworking.send(new CosmicApiRawPayload(protocolCodec.encodeClientHello(hello)));
+            ClientPlayNetworking.send(
+                    new CosmicApiRawPayload(protocolCodec.encodeClientHello(hello)));
             helloSent = true;
             LOGGER.info("Cosmic API official client hello sent");
         } catch (RuntimeException ex) {
