@@ -38,23 +38,19 @@ import java.util.regex.Pattern;
 import me.landon.CosmicPrisonsMod;
 import me.landon.client.feature.ClientFeatureDefinition;
 import me.landon.client.feature.ClientFeatures;
+import me.landon.client.screen.CosmicApiQuestionScreen;
 import me.landon.client.screen.FeatureSettingsScreen;
 import me.landon.companion.attestation.BuildAttestation;
 import me.landon.companion.attestation.BuildAttestationLoader;
-import me.landon.companion.attestation.SignatureVerifier;
 import me.landon.companion.config.CompanionConfig;
 import me.landon.companion.config.CompanionConfigManager;
-import me.landon.companion.network.CompanionRawPayload;
-import me.landon.companion.protocol.BinaryDecodingException;
-import me.landon.companion.protocol.ProtocolCodec;
-import me.landon.companion.protocol.ProtocolConstants;
-import me.landon.companion.protocol.ProtocolMessage;
-import me.landon.companion.session.ConnectionGateState;
+import me.landon.cosmicapi.protocol.CosmicApiProtocolConstants;
+import me.landon.cosmicapi.protocol.CosmicApiRuntimePayloads;
+import me.landon.cosmicapi.protocol.CosmicApiServerMessage;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientWorldEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
-import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderContext;
 import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderEvents;
@@ -68,7 +64,6 @@ import net.minecraft.client.gui.screen.GameMenuScreen;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.input.KeyInput;
-import net.minecraft.client.network.ServerInfo;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.render.RenderTickCounter;
 import net.minecraft.client.render.block.entity.BeaconBlockEntityRenderer;
@@ -99,7 +94,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Singleton client runtime that owns companion protocol handling, feature gating, and render state.
+ * Singleton client runtime that owns Cosmic API feature handling, gating, and render state.
  *
  * <p>Contributors should treat this class as the main integration point for new server-driven
  * client features. Register behavior through existing lifecycle hooks, gate by {@link
@@ -108,7 +103,14 @@ import org.slf4j.LoggerFactory;
 public final class CompanionClientRuntime {
     private static final Logger LOGGER = LoggerFactory.getLogger(CompanionClientRuntime.class);
     private static final CompanionClientRuntime INSTANCE = new CompanionClientRuntime();
-    private static final int CLIENT_CAPABILITIES_BITSET = 127;
+    private static final int COSMIC_API_FEATURE_FLAGS =
+            CosmicApiProtocolConstants.SERVER_FEATURE_HUD_WIDGETS
+                    | CosmicApiProtocolConstants.SERVER_FEATURE_ENTITY_MARKERS
+                    | CosmicApiProtocolConstants.SERVER_FEATURE_ASK_QUESTION
+                    | CosmicApiProtocolConstants.SERVER_FEATURE_BROADCAST
+                    | CosmicApiProtocolConstants.SERVER_FEATURE_PING_PONG
+                    | CosmicApiProtocolConstants.SERVER_FEATURE_INVENTORY_ITEM_OVERLAYS
+                    | CosmicApiProtocolConstants.FEATURE_GANG_TRUCE_PINGS;
     private static final int PLAYER_STORAGE_MIN_SLOT = 0;
     private static final int HOTBAR_MAX_SLOT = 8;
     private static final int PLAYER_STORAGE_MAX_SLOT = 35;
@@ -180,18 +182,7 @@ public final class CompanionClientRuntime {
     private static final long COORDS_PING_LIFETIME_MILLIS = 5L * 60L * 1000L; // 5 mins
     private static final long PING_FEEDBACK_COOLDOWN_MILLIS = 1500L;
     private static final long UPDATE_CHECK_INTERVAL_MILLIS = 60_000L;
-    private static final int CLIENT_HELLO_MAX_ATTEMPTS = 4;
-    private static final int CLIENT_HELLO_RETRY_INTERVAL_TICKS = 20;
-    private static final int CLIENT_HELLO_CHANNEL_UNAVAILABLE_RETRY_TICKS = 10;
-    private static final int COMPANION_C2S_MAX_PER_SECOND = 8;
-    private static final long COMPANION_C2S_WINDOW_MILLIS = 1000L;
-    private static final long COMPANION_C2S_RATE_LIMIT_WARN_COOLDOWN_MILLIS = 5000L;
-    private static final long COMPANION_DIAGNOSTICS_LOG_INTERVAL_MILLIS = 15_000L;
-    private static final String PACKET_DIAGNOSTICS_PROPERTY = "cosmicprisons.debug.packets";
-    private static final String PACKET_DIAGNOSTICS_ENV = "COSMICPRISONS_DEBUG_PACKETS";
-    private static final boolean PACKET_DIAGNOSTICS_ENABLED =
-            isTruthy(System.getProperty(PACKET_DIAGNOSTICS_PROPERTY))
-                    || isTruthy(System.getenv(PACKET_DIAGNOSTICS_ENV));
+    private static final int MAX_RECENT_COSMIC_API_HOOK_EVENTS = 32;
     private static final String MOD_RELEASE_MANIFEST_URL =
             "https://github.com/LandonDev/CosmicPrisonsMod/releases/latest/download/cosmic-launcher-manifest.json";
     private static final String LAUNCHER_PROOF_PROPERTY = "cosmicprisons.launcher.proof";
@@ -208,10 +199,8 @@ public final class CompanionClientRuntime {
     private static final Pattern VERSION_PATTERN =
             Pattern.compile("^[vV]?(\\d+)(?:\\.(\\d+))?(?:\\.(\\d+))?.*$");
 
-    private final ProtocolCodec protocolCodec = new ProtocolCodec();
-    private final SignatureVerifier signatureVerifier = new SignatureVerifier();
     private final ConnectionSessionState session = new ConnectionSessionState();
-    private final CompanionConfigManager configManager = new CompanionConfigManager();
+    private CompanionConfigManager configManager;
     private final BuildAttestationLoader buildAttestationLoader = new BuildAttestationLoader();
     private final LauncherProofProvider launcherProofProvider = new LauncherProofProvider();
     private final ModUpdateChecker modUpdateChecker =
@@ -233,6 +222,9 @@ public final class CompanionClientRuntime {
             new Int2ObjectOpenHashMap<>();
     private final Int2ObjectMap<PingLabelSnapshot> trucePingLabelSnapshots =
             new Int2ObjectOpenHashMap<>();
+    private final Map<String, Integer> cosmicApiHookEventCounts = new LinkedHashMap<>();
+    private final List<CosmicApiHookEventSnapshot> recentCosmicApiHookEvents = new ArrayList<>();
+    private int approvedCosmicApiFeatureFlags;
     private KeyBinding gangPingKeyBinding;
     private KeyBinding trucePingKeyBinding;
 
@@ -241,26 +233,12 @@ public final class CompanionClientRuntime {
 
     private CompanionConfig config;
     private BuildAttestation buildAttestation;
-    private int helloRetriesRemaining;
-    private int helloRetryCooldownTicks;
-    private boolean helloUnavailableLogged;
     private ConnectionSessionState.ItemOverlayEntry activeCursorOverlayEntry;
-    private ItemStack activeCursorOverlayStack = ItemStack.EMPTY;
+    private ItemStack activeCursorOverlayStack;
     private int activeCursorOverlaySlot = -1;
     private int pendingCursorOverlayFrames;
     private volatile int activePeacefulMiningTargetEntityId = -1;
     private long lastPingFeedbackAtMillis;
-    private long companionSendWindowStartAtMillis;
-    private int companionSendWindowCount;
-    private long companionSendAttempts;
-    private long companionSendSuccess;
-    private long companionSendBlockedNoPlayer;
-    private long companionSendBlockedTargetServer;
-    private long companionSendBlockedChannelUnavailable;
-    private long companionSendBlockedRateLimit;
-    private long companionSendBlockedEncoding;
-    private long lastCompanionRateLimitWarnAtMillis;
-    private long lastCompanionDiagnosticsLogAtMillis;
     private boolean gangPingKeyWasDown;
     private boolean trucePingKeyWasDown;
     private boolean outdatedNoticeLeftMouseDown;
@@ -271,6 +249,15 @@ public final class CompanionClientRuntime {
 
     private record PingLabelSnapshot(Vec3d anchorPos, String entityName, float healthValue) {}
 
+    public record CosmicApiHookEventSnapshot(
+            String eventType, Map<String, Object> payload, long receivedAtEpochMillis) {
+        public CosmicApiHookEventSnapshot {
+            eventType = eventType == null ? "" : eventType.trim();
+            payload =
+                    payload == null || payload.isEmpty() ? Map.of() : new LinkedHashMap<>(payload);
+        }
+    }
+
     /** Returns the global runtime instance used by all client integration points. */
     public static CompanionClientRuntime getInstance() {
         return INSTANCE;
@@ -279,36 +266,32 @@ public final class CompanionClientRuntime {
     private CompanionClientRuntime() {}
 
     /**
-     * Initializes the runtime once and registers all client event listeners.
+     * Initializes local client UI, keybind, and render hooks once.
      *
-     * <p>This must be called from the Fabric client entrypoint only.
+     * <p>The legacy Server Companion payload channel is intentionally not registered. Server-backed
+     * communication now goes through {@code cosmicapi:main}.
      */
     public synchronized void initializeClient() {
         if (initialized) {
             return;
         }
 
-        config = configManager.load();
+        config = configManager().load();
         buildAttestation = buildAttestationLoader.load(resolveModVersion());
         ensureFeatureDefaultsPersisted();
         initializePingKeybinds();
 
-        ClientPlayNetworking.registerGlobalReceiver(
-                CompanionRawPayload.ID, this::onPayloadReceived);
         ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> onJoin(client));
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> onDisconnect());
         ClientTickEvents.END_CLIENT_TICK.register(this::onEndTick);
         ClientWorldEvents.AFTER_CLIENT_WORLD_CHANGE.register(this::onWorldChange);
         ScreenEvents.AFTER_INIT.register(this::onScreenAfterInit);
         WorldRenderEvents.END_MAIN.register(this::onWorldRenderEndMain);
-
         HudRenderCallback.EVENT.register(this::renderHud);
 
         initialized = true;
-    }
-
-    public synchronized boolean isPayloadFallbackEnabled() {
-        return getConfig().enablePayloadCodecFallback;
+        LOGGER.info(
+                "Cosmic Prisons local client runtime initialized; legacy companion networking disabled");
     }
 
     /** Returns the feature catalog used by settings and runtime gating logic. */
@@ -333,7 +316,7 @@ public final class CompanionClientRuntime {
 
         CompanionConfig currentConfig = getConfig();
         currentConfig.featureToggles.put(featureId, enabled);
-        configManager.save(currentConfig);
+        configManager().save(currentConfig);
         config = currentConfig;
     }
 
@@ -342,6 +325,89 @@ public final class CompanionClientRuntime {
         return ClientFeatures.findById(featureId)
                 .map(this::isFeatureSupportedByServer)
                 .orElse(false);
+    }
+
+    public synchronized void onCosmicApiSessionResolved(
+            String serverScope, List<String> allowedScopes, List<String> allowedHooks) {
+        String normalizedScope =
+                serverScope == null || serverScope.isBlank() ? "unknown" : serverScope.trim();
+        approvedCosmicApiFeatureFlags =
+                CosmicApiProtocolConstants.featureFlagsForScopes(allowedScopes);
+        session.enableCosmicApiSession(
+                "cosmicapi:" + normalizedScope, "cosmic-api", approvedCosmicApiFeatureFlags);
+        session.setHudWidgetsSupported(
+                (approvedCosmicApiFeatureFlags
+                                & CosmicApiProtocolConstants.SERVER_FEATURE_HUD_WIDGETS)
+                        != 0);
+        session.setInventoryItemOverlaysSupported(
+                (approvedCosmicApiFeatureFlags
+                                & CosmicApiProtocolConstants.SERVER_FEATURE_INVENTORY_ITEM_OVERLAYS)
+                        != 0);
+        LOGGER.info(
+                "Cosmic API session enabled local runtime scope={} scopes={} hooks={}",
+                normalizedScope,
+                allowedScopes == null ? 0 : allowedScopes.size(),
+                allowedHooks == null ? 0 : allowedHooks.size());
+    }
+
+    public synchronized void onCosmicApiSessionCleared() {
+        session.reset();
+        approvedCosmicApiFeatureFlags = 0;
+        clearPingVisualTracking();
+        clearOverlayRenderCaches();
+        clearActivePeacefulMiningTarget();
+        gangPingKeyWasDown = false;
+        trucePingKeyWasDown = false;
+        cosmicApiHookEventCounts.clear();
+        recentCosmicApiHookEvents.clear();
+    }
+
+    public synchronized void handleCosmicApiAction(CosmicApiServerMessage message) {
+        if (message == null) {
+            return;
+        }
+
+        Map<String, Object> payload = message.payload() == null ? Map.of() : message.payload();
+        String actionType = message.actionType();
+        if (actionType == null || actionType.isBlank()) {
+            actionType = stringValue(firstPresent(payload, "type", "actionType", "eventType"));
+        }
+
+        if (!applyCosmicApiAction(actionType, payload)) {
+            LOGGER.debug("Ignored unsupported Cosmic API action {}", actionType);
+        }
+    }
+
+    public synchronized void handleCosmicApiHookEvent(CosmicApiServerMessage message) {
+        if (message == null) {
+            return;
+        }
+
+        Map<String, Object> payload = message.payload() == null ? Map.of() : message.payload();
+        String eventType = message.actionType();
+        if (eventType == null || eventType.isBlank()) {
+            eventType = stringValue(firstPresent(payload, "eventType", "type"));
+        }
+        if (eventType.isBlank()) {
+            LOGGER.debug("Ignored Cosmic API hook event without event type");
+            return;
+        }
+
+        cosmicApiHookEventCounts.merge(eventType, 1, Integer::sum);
+        recentCosmicApiHookEvents.add(
+                new CosmicApiHookEventSnapshot(eventType, payload, System.currentTimeMillis()));
+        while (recentCosmicApiHookEvents.size() > MAX_RECENT_COSMIC_API_HOOK_EVENTS) {
+            recentCosmicApiHookEvents.removeFirst();
+        }
+        LOGGER.debug("Received Cosmic API hook event {}", eventType);
+    }
+
+    public synchronized Map<String, Integer> cosmicApiHookEventCountsSnapshot() {
+        return new LinkedHashMap<>(cosmicApiHookEventCounts);
+    }
+
+    public synchronized List<CosmicApiHookEventSnapshot> recentCosmicApiHookEventsSnapshot() {
+        return List.copyOf(recentCosmicApiHookEvents);
     }
 
     /** Returns a snapshot of event visibility overrides used by the HUD event widget. */
@@ -358,7 +424,7 @@ public final class CompanionClientRuntime {
         CompanionConfig currentConfig = getConfig();
         currentConfig.hudEventVisibility.put(
                 eventKey.trim().toLowerCase(java.util.Locale.ROOT), visible);
-        configManager.save(currentConfig);
+        configManager().save(currentConfig);
         config = currentConfig;
     }
 
@@ -370,7 +436,7 @@ public final class CompanionClientRuntime {
     public synchronized void setHudEventsCompactMode(boolean compactMode) {
         CompanionConfig currentConfig = getConfig();
         currentConfig.hudEventsCompactMode = compactMode;
-        configManager.save(currentConfig);
+        configManager().save(currentConfig);
         config = currentConfig;
     }
 
@@ -382,7 +448,7 @@ public final class CompanionClientRuntime {
     public synchronized void setHudSatchelsCompactMode(boolean compactMode) {
         CompanionConfig currentConfig = getConfig();
         currentConfig.hudSatchelsCompactMode = compactMode;
-        configManager.save(currentConfig);
+        configManager().save(currentConfig);
         config = currentConfig;
     }
 
@@ -403,7 +469,7 @@ public final class CompanionClientRuntime {
 
         CompanionConfig currentConfig = getConfig();
         currentConfig.hudLeaderboardVisibility.put(normalized, visible);
-        configManager.save(currentConfig);
+        configManager().save(currentConfig);
         config = currentConfig;
     }
 
@@ -415,7 +481,7 @@ public final class CompanionClientRuntime {
     public synchronized void setHudLeaderboardsCompactMode(boolean compactMode) {
         CompanionConfig currentConfig = getConfig();
         currentConfig.hudLeaderboardsCompactMode = compactMode;
-        configManager.save(currentConfig);
+        configManager().save(currentConfig);
         config = currentConfig;
     }
 
@@ -427,7 +493,7 @@ public final class CompanionClientRuntime {
     public synchronized void setHudLeaderboardsCycleMode(boolean cycleMode) {
         CompanionConfig currentConfig = getConfig();
         currentConfig.hudLeaderboardsCycleMode = cycleMode;
-        configManager.save(currentConfig);
+        configManager().save(currentConfig);
         config = currentConfig;
     }
 
@@ -533,7 +599,7 @@ public final class CompanionClientRuntime {
         currentConfig.hudWidgetPositions.put(
                 normalizeWidgetId(widgetId),
                 new CompanionConfig.HudWidgetPosition(normalizedX, normalizedY));
-        configManager.save(currentConfig);
+        configManager().save(currentConfig);
         config = currentConfig;
     }
 
@@ -546,7 +612,7 @@ public final class CompanionClientRuntime {
         CompanionConfig currentConfig = getConfig();
         currentConfig.hudWidgetScales.put(
                 normalizeWidgetId(widgetId), CompanionConfig.clampHudWidgetScale(scale));
-        configManager.save(currentConfig);
+        configManager().save(currentConfig);
         config = currentConfig;
     }
 
@@ -560,7 +626,7 @@ public final class CompanionClientRuntime {
         currentConfig.hudWidgetWidthMultipliers.put(
                 normalizeWidgetId(widgetId),
                 CompanionConfig.clampHudWidgetWidthMultiplier(widthMultiplier));
-        configManager.save(currentConfig);
+        configManager().save(currentConfig);
         config = currentConfig;
     }
 
@@ -572,7 +638,7 @@ public final class CompanionClientRuntime {
         currentConfig.hudWidgetScales = new LinkedHashMap<>(defaults.hudWidgetScales);
         currentConfig.hudWidgetWidthMultipliers =
                 new LinkedHashMap<>(defaults.hudWidgetWidthMultipliers);
-        configManager.save(currentConfig);
+        configManager().save(currentConfig);
         config = currentConfig;
     }
 
@@ -639,7 +705,7 @@ public final class CompanionClientRuntime {
         }
 
         currentConfig.pingVisualDurationSeconds = clamped;
-        configManager.save(currentConfig);
+        configManager().save(currentConfig);
         config = currentConfig;
     }
 
@@ -659,7 +725,7 @@ public final class CompanionClientRuntime {
         }
 
         currentConfig.pingVisualMode = normalizedMode;
-        configManager.save(currentConfig);
+        configManager().save(currentConfig);
         config = currentConfig;
         clearPingAnchorSnapshots();
     }
@@ -677,7 +743,7 @@ public final class CompanionClientRuntime {
         }
 
         currentConfig.pingParticlesEnabled = enabled;
-        configManager.save(currentConfig);
+        configManager().save(currentConfig);
         config = currentConfig;
     }
 
@@ -688,7 +754,7 @@ public final class CompanionClientRuntime {
                 CompanionConfig.PING_VISUAL_DURATION_SECONDS_DEFAULT;
         currentConfig.pingVisualMode = CompanionConfig.PING_VISUAL_MODE_DEFAULT;
         currentConfig.pingParticlesEnabled = true;
-        configManager.save(currentConfig);
+        configManager().save(currentConfig);
         config = currentConfig;
         clearPingAnchorSnapshots();
     }
@@ -746,6 +812,15 @@ public final class CompanionClientRuntime {
     /** Returns whether an entity should be rendered with peaceful-mining ghost visuals. */
     public boolean isPeacefulMiningGhostedEntity(int entityId) {
         return entityId >= 0 && entityId == activePeacefulMiningTargetEntityId;
+    }
+
+    /** Returns whether an entity should be rendered with a server-driven same-gang outline. */
+    public synchronized boolean isSameGangMarkedEntity(int entityId) {
+        return entityId >= 0
+                && session.isEnabled()
+                && isCosmicApiFeatureApproved(
+                        CosmicApiProtocolConstants.SERVER_FEATURE_ENTITY_MARKERS)
+                && session.isSameGangEntity(entityId);
     }
 
     /** Renders a stack overlay for one handled-screen slot when overlay data is available. */
@@ -880,11 +955,8 @@ public final class CompanionClientRuntime {
         clearPingVisualTracking();
         clearOverlayRenderCaches();
         clearActivePeacefulMiningTarget();
-        resetCompanionSendDiagnostics();
         gangPingKeyWasDown = false;
         trucePingKeyWasDown = false;
-        initializeHelloRetryState();
-        attemptSendClientHello(client);
     }
 
     private synchronized void onDisconnect() {
@@ -894,7 +966,6 @@ public final class CompanionClientRuntime {
         clearActivePeacefulMiningTarget();
         gangPingKeyWasDown = false;
         trucePingKeyWasDown = false;
-        disableHelloRetryState();
     }
 
     private synchronized void onEndTick(MinecraftClient client) {
@@ -906,41 +977,18 @@ public final class CompanionClientRuntime {
 
         processPingKeybinds(client);
         emitPingBeaconParticles(client);
-
-        if (helloRetryCooldownTicks > 0) {
-            helloRetryCooldownTicks--;
-        }
-
-        if (!session.helloSent()
-                && helloRetriesRemaining > 0
-                && helloRetryCooldownTicks <= 0
-                && isCompanionTargetServer(client)) {
-            attemptSendClientHello(client);
-        }
-
-        maybeLogCompanionPacketDiagnostics(client);
     }
 
     private synchronized void onWorldChange(MinecraftClient client, ClientWorld world) {
         session.clearInventoryItemOverlays();
         session.clearHudWidgets();
         session.clearPeacefulMiningPassThroughIds();
+        session.clearSameGangEntityIds();
         session.clearGangPingBeaconIds();
         session.clearTrucePingBeaconIds();
         clearPingVisualTracking();
         clearOverlayRenderCaches();
         clearActivePeacefulMiningTarget();
-
-        if (world == null || client.player == null) {
-            return;
-        }
-
-        if (session.gateState().isEnabled() || session.helloSent()) {
-            session.reset();
-        }
-
-        initializeHelloRetryState();
-        attemptSendClientHello(client);
     }
 
     private synchronized void onScreenAfterInit(
@@ -963,138 +1011,72 @@ public final class CompanionClientRuntime {
                                 .build());
     }
 
-    private void onPayloadReceived(
-            CompanionRawPayload payload, ClientPlayNetworking.Context context) {
-        byte[] payloadBytes = payload.payloadBytes();
-        MinecraftClient client = context.client();
-        client.execute(() -> onPayloadReceivedOnClient(payloadBytes, client));
-    }
-
-    private synchronized void onPayloadReceivedOnClient(
-            byte[] payloadBytes, MinecraftClient client) {
-        ProtocolCodec.DecodedFrame frame;
-
-        try {
-            frame = protocolCodec.decode(payloadBytes);
-        } catch (BinaryDecodingException ex) {
-            logMalformedOncePerConnection(ex);
-            return;
-        }
-
-        ProtocolMessage message = frame.message();
-
-        if (!session.gateState().shouldProcessIncoming(message)) {
-            return;
-        }
-
-        switch (message) {
-            case ProtocolMessage.ServerHelloS2C serverHello ->
-                    handleServerHello(frame.protocolVersion(), serverHello, client);
-            case ProtocolMessage.HudWidgetStateS2C hudWidgetState ->
-                    handleHudWidgetState(hudWidgetState);
-            case ProtocolMessage.EntityMarkerDeltaS2C markerDelta ->
-                    handleEntityMarkerDelta(markerDelta);
-            case ProtocolMessage.InventoryItemOverlaysS2C overlays ->
-                    handleInventoryItemOverlays(overlays);
-            default -> {}
-        }
-    }
-
-    private void handleServerHello(
-            int protocolVersion,
-            ProtocolMessage.ServerHelloS2C serverHello,
-            MinecraftClient client) {
-        CompanionConfig currentConfig = getConfig();
-        ConnectionGateState.EnableResult result =
-                session.gateState()
-                        .tryEnable(
-                                protocolVersion,
-                                serverHello,
-                                currentConfig,
-                                signatureVerifier::verifyServerHello);
-
-        if (!result.enabled()) {
-            LOGGER.debug("Ignored ServerHello due to {}", result);
-
-            if (result == ConnectionGateState.EnableResult.SERVER_NOT_ALLOWED) {
-                sendClientMessage(
-                        client,
-                        Text.translatable(
-                                "text.cosmicprisonsmod.server_not_allowed",
-                                serverHello.serverId()));
-            }
-
-            return;
-        }
-
-        session.setServerHello(serverHello);
-
-        boolean supportsHudWidgets =
-                (serverHello.serverFeatureFlagsBitset()
-                                & ProtocolConstants.SERVER_FEATURE_HUD_WIDGETS)
-                        != 0;
-        boolean supportsInventoryItemOverlays =
-                (serverHello.serverFeatureFlagsBitset()
-                                & ProtocolConstants.SERVER_FEATURE_INVENTORY_ITEM_OVERLAYS)
-                        != 0;
-        boolean supportsEntityMarkers =
-                (serverHello.serverFeatureFlagsBitset()
-                                & ProtocolConstants.SERVER_FEATURE_ENTITY_MARKERS)
-                        != 0;
-        boolean supportsGangTrucePings =
-                (serverHello.serverFeatureFlagsBitset()
-                                & ProtocolConstants.FEATURE_GANG_TRUCE_PINGS)
-                        != 0;
-        session.setHudWidgetsSupported(supportsHudWidgets);
-        session.setInventoryItemOverlaysSupported(supportsInventoryItemOverlays);
-
-        if (!supportsHudWidgets) {
-            session.clearHudWidgets();
-        }
-
-        if (!supportsInventoryItemOverlays) {
-            session.clearInventoryItemOverlays();
-            clearOverlayRenderCaches();
-        }
-
-        if (!supportsEntityMarkers) {
-            session.clearPeacefulMiningPassThroughIds();
-            clearActivePeacefulMiningTarget();
-        }
-
-        if (!supportsGangTrucePings) {
-            session.clearGangPingBeaconIds();
-            session.clearTrucePingBeaconIds();
-            clearPingVisualTracking();
-        }
-    }
-
-    private void handleInventoryItemOverlays(ProtocolMessage.InventoryItemOverlaysS2C overlays) {
+    private void handleInventoryItemOverlays(
+            List<CosmicApiRuntimePayloads.InventoryItemOverlay> overlays) {
         if (!session.inventoryItemOverlaysSupported()) {
             session.setInventoryItemOverlaysSupported(true);
         }
 
-        session.replaceInventoryItemOverlays(overlays.overlays());
+        session.replaceInventoryItemOverlays(overlays);
         cacheKnownOverlayStacksFromCurrentSnapshot();
     }
 
-    private void handleHudWidgetState(ProtocolMessage.HudWidgetStateS2C hudWidgetState) {
+    private void handleInventoryItemOverlayUpdate(
+            CosmicApiRuntimePayloads.InventoryItemOverlay overlay) {
+        if (!session.inventoryItemOverlaysSupported()) {
+            session.setInventoryItemOverlaysSupported(true);
+        }
+
+        session.upsertInventoryItemOverlay(overlay);
+        cacheKnownOverlayStacksFromCurrentSnapshot();
+    }
+
+    private void handleInventoryItemOverlayRemove(int slot) {
+        if (!session.inventoryItemOverlaysSupported()) {
+            session.setInventoryItemOverlaysSupported(true);
+        }
+
+        session.removeInventoryItemOverlay(slot);
+        clearOverlayRenderCaches();
+        cacheKnownOverlayStacksFromCurrentSnapshot();
+    }
+
+    private void handleHudWidgetState(List<CosmicApiRuntimePayloads.HudWidget> widgets) {
         if (!session.hudWidgetsSupported()) {
             session.setHudWidgetsSupported(true);
         }
 
-        session.replaceHudWidgets(hudWidgetState.widgets());
+        session.replaceHudWidgets(widgets);
     }
 
-    private void handleEntityMarkerDelta(ProtocolMessage.EntityMarkerDeltaS2C markerDelta) {
+    private void handleHudWidgetUpdate(CosmicApiRuntimePayloads.HudWidget widget) {
+        if (!session.hudWidgetsSupported()) {
+            session.setHudWidgetsSupported(true);
+        }
+
+        session.upsertHudWidget(widget);
+    }
+
+    private void handleHudWidgetRemove(String widgetId) {
+        if (!session.hudWidgetsSupported()) {
+            session.setHudWidgetsSupported(true);
+        }
+
+        session.removeHudWidget(widgetId);
+    }
+
+    private void handleEntityMarkerDelta(CosmicApiRuntimePayloads.EntityMarkerDelta markerDelta) {
         switch (markerDelta.markerType()) {
-            case ProtocolConstants.MARKER_TYPE_PEACEFUL_MINING_PASS_THROUGH ->
+            case CosmicApiProtocolConstants.MARKER_TYPE_PEACEFUL_MINING_PASS_THROUGH ->
                     session.applyPeacefulMiningPassThroughDelta(
                             markerDelta.addEntityIds(), markerDelta.removeEntityIds());
-            case ProtocolConstants.MARKER_TYPE_GANG_PING_BEACON ->
+            case CosmicApiProtocolConstants.MARKER_TYPE_SAME_GANG ->
+                    session.applySameGangEntityDelta(
+                            markerDelta.addEntityIds(), markerDelta.removeEntityIds());
+            case CosmicApiProtocolConstants.MARKER_TYPE_GANG_PING_BEACON ->
                     applyGangPingBeaconDelta(
                             markerDelta.addEntityIds(), markerDelta.removeEntityIds());
-            case ProtocolConstants.MARKER_TYPE_TRUCE_PING_BEACON ->
+            case CosmicApiProtocolConstants.MARKER_TYPE_TRUCE_PING_BEACON ->
                     applyTrucePingBeaconDelta(
                             markerDelta.addEntityIds(), markerDelta.removeEntityIds());
             default -> {}
@@ -1119,6 +1101,552 @@ public final class CompanionClientRuntime {
                 trucePingVisualSeededIds,
                 addEntityIds,
                 removeEntityIds);
+    }
+
+    private boolean applyCosmicApiAction(String actionType, Map<String, Object> payload) {
+        Map<String, Object> safePayload = payload == null ? Map.of() : payload;
+        String normalizedAction = normalizeApiToken(actionType);
+        boolean handled =
+                switch (normalizedAction) {
+                    case "hud.widgets", "hudwidgets", "hud.widget.state", "hud", "widgets" ->
+                            applyCosmicApiHudWidgets(safePayload);
+                    case "hud.widget",
+                                    "hud.widget.set",
+                                    "hud.widget.update",
+                                    "widget",
+                                    "widget.set",
+                                    "widget.update" ->
+                            applyCosmicApiHudWidgetUpdate(safePayload);
+                    case "hud.widget.clear", "hud.widget.remove", "widget.clear", "widget.remove" ->
+                            applyCosmicApiHudWidgetRemove(safePayload);
+                    case "inventory.overlays",
+                                    "inventory.item.overlays",
+                                    "inventoryoverlays",
+                                    "inventoryitemoverlays",
+                                    "overlays" ->
+                            applyCosmicApiInventoryOverlays(safePayload);
+                    case "inventory.overlay",
+                                    "inventory.overlay.set",
+                                    "inventory.overlay.update",
+                                    "inventory.item.overlay",
+                                    "inventory.item.overlay.set",
+                                    "inventory.item.overlay.update" ->
+                            applyCosmicApiInventoryOverlayUpdate(safePayload);
+                    case "inventory.overlay.clear",
+                                    "inventory.overlay.remove",
+                                    "inventory.item.overlay.clear",
+                                    "inventory.item.overlay.remove" ->
+                            applyCosmicApiInventoryOverlayRemove(safePayload);
+                    case "entity.markers",
+                                    "entitymarkers",
+                                    "entity.marker.delta",
+                                    "markers",
+                                    "markerdeltas",
+                                    "entity.markers.clear",
+                                    "entity.marker.clear",
+                                    "markers.clear" ->
+                            applyCosmicApiEntityMarkers(safePayload);
+                    case "waypoint",
+                                    "waypoints",
+                                    "waypoint.set",
+                                    "ui.waypoint",
+                                    "ui.waypoint.set" ->
+                            applyCosmicApiWaypointSet(safePayload);
+                    case "waypoint.clear",
+                                    "waypoint.remove",
+                                    "ui.waypoint.clear",
+                                    "ui.waypoint.remove" ->
+                            applyCosmicApiWaypointClear();
+                    case "session.capabilities", "capabilities" ->
+                            applyCosmicApiCapabilities(safePayload);
+                    case "broadcast", "broadcast.message", "message.broadcast" ->
+                            applyCosmicApiBroadcast(safePayload);
+                    case "question.ask", "questionask", "ask.question", "askquestion" ->
+                            applyCosmicApiQuestionAsk(safePayload);
+                    default -> false;
+                };
+
+        return handled || applyCosmicApiCompositePayload(safePayload);
+    }
+
+    private boolean applyCosmicApiCompositePayload(Map<String, Object> payload) {
+        boolean handled = false;
+        if (payload.containsKey("hud")
+                || payload.containsKey("widgets")
+                || payload.containsKey("hudWidgets")) {
+            handled |= applyCosmicApiHudWidgets(payload);
+        }
+        if (payload.containsKey("inventoryOverlays")
+                || payload.containsKey("inventoryItemOverlays")
+                || payload.containsKey("overlays")) {
+            handled |= applyCosmicApiInventoryOverlays(payload);
+        }
+        if (payload.containsKey("markers")
+                || payload.containsKey("entityMarkers")
+                || payload.containsKey("markerDeltas")
+                || payload.containsKey("markerType")) {
+            handled |= applyCosmicApiEntityMarkers(payload);
+        }
+        if (payload.containsKey("waypoint") || payload.containsKey("waypoints")) {
+            handled |= applyCosmicApiWaypointSet(payload);
+        }
+        if (payload.containsKey("featureFlags") || payload.containsKey("capabilities")) {
+            handled |= applyCosmicApiCapabilities(payload);
+        }
+        return handled;
+    }
+
+    private boolean applyCosmicApiCapabilities(Map<String, Object> payload) {
+        Map<String, Object> capabilityPayload = objectMap(payload.get("capabilities"));
+        if (capabilityPayload != null && !capabilityPayload.isEmpty()) {
+            Map<String, Object> merged = new LinkedHashMap<>(capabilityPayload);
+            merged.putAll(payload);
+            payload = merged;
+        }
+
+        int featureFlags =
+                intValue(firstPresent(payload, "featureFlags", "flags"), COSMIC_API_FEATURE_FLAGS);
+        if (featureFlags <= 0) {
+            featureFlags = COSMIC_API_FEATURE_FLAGS;
+        }
+        if (approvedCosmicApiFeatureFlags > 0) {
+            featureFlags &= approvedCosmicApiFeatureFlags;
+        }
+        session.enableCosmicApiSession(
+                session.serverId(), session.serverPluginVersion(), featureFlags);
+        session.setHudWidgetsSupported(
+                ((featureFlags & CosmicApiProtocolConstants.SERVER_FEATURE_HUD_WIDGETS) != 0)
+                        && booleanValue(firstPresent(payload, "hudWidgets", "hud"), true));
+        session.setInventoryItemOverlaysSupported(
+                ((featureFlags & CosmicApiProtocolConstants.SERVER_FEATURE_INVENTORY_ITEM_OVERLAYS)
+                                != 0)
+                        && booleanValue(
+                                firstPresent(payload, "inventoryOverlays", "inventoryItemOverlays"),
+                                true));
+        return true;
+    }
+
+    private boolean applyCosmicApiHudWidgets(Map<String, Object> payload) {
+        if (!isCosmicApiFeatureApproved(CosmicApiProtocolConstants.SERVER_FEATURE_HUD_WIDGETS)) {
+            return false;
+        }
+
+        if (booleanValue(firstPresent(payload, "clear", "clearAll", "all"), false)
+                && !hasAnyKey(payload, "widgets", "hudWidgets", "widgetState", "items")) {
+            handleHudWidgetState(List.of());
+            return true;
+        }
+
+        Object widgetSource =
+                firstPresent(payload, "widgets", "hudWidgets", "widgetState", "items");
+        Map<String, Object> hudPayload = objectMap(payload.get("hud"));
+        if (widgetSource == null && hudPayload != null) {
+            widgetSource = firstPresent(hudPayload, "widgets", "hudWidgets", "items");
+        }
+
+        List<Map<String, Object>> widgetMaps = mapList(widgetSource);
+        if (widgetMaps.isEmpty() && hasAnyKey(payload, "widgetId", "id", "key")) {
+            widgetMaps = List.of(payload);
+        }
+        if (widgetMaps.isEmpty() && widgetSource instanceof List<?>) {
+            handleHudWidgetState(List.of());
+            return true;
+        }
+        if (widgetMaps.isEmpty()) {
+            return false;
+        }
+
+        List<CosmicApiRuntimePayloads.HudWidget> widgets = new ArrayList<>(widgetMaps.size());
+        for (Map<String, Object> widgetMap : widgetMaps) {
+            String widgetId = stringValue(firstPresent(widgetMap, "widgetId", "id", "key", "name"));
+            if (widgetId.isBlank()) {
+                continue;
+            }
+
+            widgets.add(hudWidgetFromPayload(widgetId, widgetMap));
+        }
+
+        handleHudWidgetState(widgets);
+        return true;
+    }
+
+    private boolean applyCosmicApiHudWidgetUpdate(Map<String, Object> payload) {
+        if (!isCosmicApiFeatureApproved(CosmicApiProtocolConstants.SERVER_FEATURE_HUD_WIDGETS)) {
+            return false;
+        }
+
+        Map<String, Object> widgetPayload = singleNestedPayload(payload, "widget", "hudWidget");
+        if (booleanValue(firstPresent(widgetPayload, "clear", "remove"), false)) {
+            return applyCosmicApiHudWidgetRemove(widgetPayload);
+        }
+
+        String widgetId = stringValue(firstPresent(widgetPayload, "widgetId", "id", "key", "name"));
+        if (widgetId.isBlank()) {
+            return false;
+        }
+
+        handleHudWidgetUpdate(hudWidgetFromPayload(widgetId, widgetPayload));
+        return true;
+    }
+
+    private boolean applyCosmicApiHudWidgetRemove(Map<String, Object> payload) {
+        if (!isCosmicApiFeatureApproved(CosmicApiProtocolConstants.SERVER_FEATURE_HUD_WIDGETS)) {
+            return false;
+        }
+
+        if (booleanValue(firstPresent(payload, "clearAll", "all"), false)) {
+            handleHudWidgetState(List.of());
+            return true;
+        }
+
+        Map<String, Object> widgetPayload = singleNestedPayload(payload, "widget", "hudWidget");
+        String widgetId = stringValue(firstPresent(widgetPayload, "widgetId", "id", "key", "name"));
+        if (widgetId.isBlank()) {
+            return false;
+        }
+
+        handleHudWidgetRemove(widgetId);
+        return true;
+    }
+
+    private boolean applyCosmicApiInventoryOverlays(Map<String, Object> payload) {
+        if (!isCosmicApiFeatureApproved(
+                CosmicApiProtocolConstants.SERVER_FEATURE_INVENTORY_ITEM_OVERLAYS)) {
+            return false;
+        }
+
+        if (booleanValue(firstPresent(payload, "clear", "clearAll", "all"), false)
+                && !hasAnyKey(
+                        payload,
+                        "inventoryOverlays",
+                        "inventoryItemOverlays",
+                        "overlays",
+                        "items")) {
+            handleInventoryItemOverlays(List.of());
+            return true;
+        }
+
+        Object overlaySource =
+                firstPresent(
+                        payload, "inventoryOverlays", "inventoryItemOverlays", "overlays", "items");
+        List<Map<String, Object>> overlayMaps = mapList(overlaySource);
+        if (overlayMaps.isEmpty() && hasAnyKey(payload, "slot", "overlayType", "displayText")) {
+            overlayMaps = List.of(payload);
+        }
+        if (overlayMaps.isEmpty() && overlaySource instanceof List<?>) {
+            handleInventoryItemOverlays(List.of());
+            return true;
+        }
+        if (overlayMaps.isEmpty()) {
+            return false;
+        }
+
+        List<CosmicApiRuntimePayloads.InventoryItemOverlay> overlays =
+                new ArrayList<>(overlayMaps.size());
+        for (Map<String, Object> overlayMap : overlayMaps) {
+            CosmicApiRuntimePayloads.InventoryItemOverlay overlay =
+                    inventoryOverlayFromPayload(overlayMap);
+            if (overlay == null) {
+                continue;
+            }
+            overlays.add(overlay);
+        }
+
+        handleInventoryItemOverlays(overlays);
+        return true;
+    }
+
+    private boolean applyCosmicApiInventoryOverlayUpdate(Map<String, Object> payload) {
+        if (!isCosmicApiFeatureApproved(
+                CosmicApiProtocolConstants.SERVER_FEATURE_INVENTORY_ITEM_OVERLAYS)) {
+            return false;
+        }
+
+        Map<String, Object> overlayPayload = singleNestedPayload(payload, "overlay", "itemOverlay");
+        if (booleanValue(firstPresent(overlayPayload, "clear", "remove"), false)) {
+            return applyCosmicApiInventoryOverlayRemove(overlayPayload);
+        }
+
+        CosmicApiRuntimePayloads.InventoryItemOverlay overlay =
+                inventoryOverlayFromPayload(overlayPayload);
+        if (overlay == null) {
+            return false;
+        }
+
+        handleInventoryItemOverlayUpdate(overlay);
+        return true;
+    }
+
+    private boolean applyCosmicApiInventoryOverlayRemove(Map<String, Object> payload) {
+        if (!isCosmicApiFeatureApproved(
+                CosmicApiProtocolConstants.SERVER_FEATURE_INVENTORY_ITEM_OVERLAYS)) {
+            return false;
+        }
+
+        if (booleanValue(firstPresent(payload, "clearAll", "all"), false)) {
+            handleInventoryItemOverlays(List.of());
+            return true;
+        }
+
+        Map<String, Object> overlayPayload = singleNestedPayload(payload, "overlay", "itemOverlay");
+        int slot = intValue(firstPresent(overlayPayload, "slot", "slotIndex", "index"), -1);
+        if (slot < 0) {
+            return false;
+        }
+
+        handleInventoryItemOverlayRemove(slot);
+        return true;
+    }
+
+    private boolean applyCosmicApiBroadcast(Map<String, Object> payload) {
+        List<String> lines =
+                stringList(firstPresent(payload, "message", "messageText", "text", "lines"));
+        if (lines.isEmpty()) {
+            String message = stringValue(firstPresent(payload, "message", "messageText", "text"));
+            if (!message.isBlank()) {
+                lines = List.of(message);
+            }
+        }
+        if (lines.isEmpty()) {
+            return false;
+        }
+
+        MinecraftClient client = MinecraftClient.getInstance();
+        List<String> broadcastLines = List.copyOf(lines);
+        client.execute(
+                () -> {
+                    if (client.player == null) {
+                        return;
+                    }
+                    for (String line : broadcastLines) {
+                        if (line != null && !line.isBlank()) {
+                            sendClientMessage(client, Text.literal(line));
+                        }
+                    }
+                });
+        return true;
+    }
+
+    private boolean applyCosmicApiEntityMarkers(Map<String, Object> payload) {
+        if (!isCosmicApiFeatureApproved(CosmicApiProtocolConstants.SERVER_FEATURE_ENTITY_MARKERS)) {
+            return false;
+        }
+
+        if (booleanValue(firstPresent(payload, "clearAll", "all"), false)
+                || (booleanValue(firstPresent(payload, "clear"), false)
+                        && !hasAnyKey(payload, "markerType", "type", "kind"))) {
+            clearAllEntityMarkers();
+            return true;
+        }
+
+        boolean handled = false;
+        Object markerSource =
+                firstPresent(payload, "markers", "entityMarkers", "markerDeltas", "deltas");
+        Map<String, Object> markerMap = objectMap(markerSource);
+        if (markerMap != null) {
+            for (Map.Entry<String, Object> entry : markerMap.entrySet()) {
+                Map<String, Object> deltaMap = objectMap(entry.getValue());
+                if (deltaMap == null) {
+                    deltaMap = new LinkedHashMap<>();
+                    if (entry.getValue() != null) {
+                        deltaMap.put("entityIds", entry.getValue());
+                    }
+                }
+                handled |= applyCosmicApiMarkerDelta(entry.getKey(), deltaMap);
+            }
+        }
+
+        for (Map<String, Object> deltaMap : mapList(markerSource)) {
+            handled |= applyCosmicApiMarkerDelta("", deltaMap);
+        }
+
+        if (!handled
+                && hasAnyKey(
+                        payload, "markerType", "addEntityIds", "removeEntityIds", "entityIds")) {
+            handled = applyCosmicApiMarkerDelta("", payload);
+        }
+        return handled;
+    }
+
+    private boolean applyCosmicApiMarkerDelta(String markerKey, Map<String, Object> payload) {
+        Object markerTypeSource = firstPresent(payload, "markerType", "type", "kind");
+        if (markerTypeSource == null) {
+            markerTypeSource = markerKey;
+        }
+        int markerType = markerType(markerTypeSource);
+        if (markerType <= 0) {
+            return false;
+        }
+
+        Object replacement =
+                firstPresent(payload, "entityIds", "ids", "setEntityIds", "replaceEntityIds");
+        boolean replace =
+                replacement != null
+                        && !hasAnyKey(
+                                payload,
+                                "addEntityIds",
+                                "addedEntityIds",
+                                "add",
+                                "added",
+                                "removeEntityIds",
+                                "removedEntityIds",
+                                "remove",
+                                "removed");
+        if (replace || booleanValue(firstPresent(payload, "replace", "snapshot"), false)) {
+            clearEntityMarkerType(markerType);
+        }
+
+        List<Integer> addEntityIds =
+                replace
+                        ? intList(replacement)
+                        : intList(
+                                firstPresent(
+                                        payload, "addEntityIds", "addedEntityIds", "add", "added"));
+        List<Integer> removeEntityIds =
+                intList(
+                        firstPresent(
+                                payload,
+                                "removeEntityIds",
+                                "removedEntityIds",
+                                "remove",
+                                "removed"));
+
+        if (addEntityIds.isEmpty()
+                && removeEntityIds.isEmpty()
+                && booleanValue(firstPresent(payload, "clear"), false)) {
+            clearEntityMarkerType(markerType);
+            return true;
+        }
+
+        handleEntityMarkerDelta(
+                new CosmicApiRuntimePayloads.EntityMarkerDelta(
+                        markerType, addEntityIds, removeEntityIds));
+        return true;
+    }
+
+    private boolean applyCosmicApiWaypointSet(Map<String, Object> payload) {
+        if (!isCosmicApiFeatureApproved(CosmicApiProtocolConstants.SERVER_FEATURE_ENTITY_MARKERS)) {
+            return false;
+        }
+
+        Map<String, Object> waypointPayload = waypointPayload(payload);
+        if (booleanValue(firstPresent(waypointPayload, "clear", "remove"), false)) {
+            return applyCosmicApiWaypointClear();
+        }
+
+        Vec3d waypointPos = waypointPosition(waypointPayload);
+        if (waypointPos == null || !waypointPos.isFinite()) {
+            return false;
+        }
+
+        String label = stringValue(firstPresent(waypointPayload, "label", "name", "title", "text"));
+        long ttlMillis = waypointLifetimeMillis(waypointPayload);
+        setCoordsPing(waypointPos, label, ttlMillis);
+        return true;
+    }
+
+    private boolean applyCosmicApiWaypointClear() {
+        if (!isCosmicApiFeatureApproved(CosmicApiProtocolConstants.SERVER_FEATURE_ENTITY_MARKERS)) {
+            return false;
+        }
+
+        deleteCoordsPing();
+        return true;
+    }
+
+    private boolean applyCosmicApiQuestionAsk(Map<String, Object> payload) {
+        if (!isCosmicApiFeatureApproved(CosmicApiProtocolConstants.SERVER_FEATURE_ASK_QUESTION)) {
+            return false;
+        }
+
+        int questionId = intValue(firstPresent(payload, "questionId", "id"), -1);
+        if (questionId <= 0) {
+            return false;
+        }
+
+        String questionText =
+                stringValue(firstPresent(payload, "questionText", "question", "text"));
+        int maxAnswerChars = intValue(firstPresent(payload, "maxAnswerChars", "maxChars"), 2048);
+        int timeoutSeconds = intValue(firstPresent(payload, "timeoutSeconds", "timeout"), 0);
+
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client == null) {
+            return false;
+        }
+        Screen parent = client.currentScreen;
+        client.execute(
+                () ->
+                        client.setScreen(
+                                new CosmicApiQuestionScreen(
+                                        this,
+                                        parent,
+                                        questionId,
+                                        questionText,
+                                        maxAnswerChars,
+                                        timeoutSeconds)));
+        return true;
+    }
+
+    public synchronized boolean submitCosmicApiQuestionAnswer(
+            int questionId, String answerText, boolean cancelled) {
+        if (questionId <= 0) {
+            return false;
+        }
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("questionId", questionId);
+        payload.put("answerText", answerText == null ? "" : answerText);
+        payload.put("cancelled", cancelled);
+        return CosmicApiClientRuntime.getInstance().sendAction("question.answer", payload);
+    }
+
+    public synchronized boolean submitCosmicApiGangMessage(String body) {
+        String message = body == null ? "" : body.replace('\n', ' ').replace('\r', ' ').trim();
+        if (message.isBlank()) {
+            return false;
+        }
+        if (message.length() > 256) {
+            message = message.substring(0, 256);
+        }
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("body", message);
+        return CosmicApiClientRuntime.getInstance().sendAction("gang.message.send", payload);
+    }
+
+    private void clearAllEntityMarkers() {
+        clearEntityMarkerType(CosmicApiProtocolConstants.MARKER_TYPE_PEACEFUL_MINING_PASS_THROUGH);
+        clearEntityMarkerType(CosmicApiProtocolConstants.MARKER_TYPE_SAME_GANG);
+        clearEntityMarkerType(CosmicApiProtocolConstants.MARKER_TYPE_GANG_PING_BEACON);
+        clearEntityMarkerType(CosmicApiProtocolConstants.MARKER_TYPE_TRUCE_PING_BEACON);
+    }
+
+    private void clearEntityMarkerType(int markerType) {
+        switch (markerType) {
+            case CosmicApiProtocolConstants.MARKER_TYPE_PEACEFUL_MINING_PASS_THROUGH -> {
+                session.clearPeacefulMiningPassThroughIds();
+                clearActivePeacefulMiningTarget();
+            }
+            case CosmicApiProtocolConstants.MARKER_TYPE_SAME_GANG ->
+                    session.clearSameGangEntityIds();
+            case CosmicApiProtocolConstants.MARKER_TYPE_GANG_PING_BEACON -> {
+                session.clearGangPingBeaconIds();
+                gangPingVisualExpiryAtMillis.clear();
+                gangPingVisualSeededIds.clear();
+                gangPingStaticAnchors.clear();
+                gangPingLabelSnapshots.clear();
+            }
+            case CosmicApiProtocolConstants.MARKER_TYPE_TRUCE_PING_BEACON -> {
+                session.clearTrucePingBeaconIds();
+                trucePingVisualExpiryAtMillis.clear();
+                trucePingVisualSeededIds.clear();
+                trucePingStaticAnchors.clear();
+                trucePingLabelSnapshots.clear();
+            }
+            default -> {}
+        }
+    }
+
+    private boolean isCosmicApiFeatureApproved(int featureBit) {
+        return featureBit == 0 || (approvedCosmicApiFeatureFlags & featureBit) != 0;
     }
 
     private void trackPingVisualDelta(
@@ -1165,7 +1693,9 @@ public final class CompanionClientRuntime {
 
     private ConnectionSessionState.ItemOverlayEntry resolveCursorOverlayEntry(
             ScreenHandler handler, Slot lastClickedSlot, ItemStack cursorStack) {
-        if (activeCursorOverlayEntry != null && !activeCursorOverlayStack.isEmpty()) {
+        if (activeCursorOverlayEntry != null
+                && activeCursorOverlayStack != null
+                && !activeCursorOverlayStack.isEmpty()) {
             if (activeCursorOverlaySlot >= PLAYER_STORAGE_MIN_SLOT) {
                 ConnectionSessionState.ItemOverlayEntry refreshedOverlayEntry =
                         session.getInventoryItemOverlay(activeCursorOverlaySlot);
@@ -1242,7 +1772,7 @@ public final class CompanionClientRuntime {
     private void cacheKnownOverlayStacksFromCurrentSnapshot() {
         MinecraftClient client = MinecraftClient.getInstance();
 
-        if (client.player == null) {
+        if (client == null || client.player == null) {
             return;
         }
 
@@ -1288,7 +1818,7 @@ public final class CompanionClientRuntime {
 
     private void clearActiveCursorOverlay() {
         activeCursorOverlayEntry = null;
-        activeCursorOverlayStack = ItemStack.EMPTY;
+        activeCursorOverlayStack = null;
         activeCursorOverlaySlot = -1;
         pendingCursorOverlayFrames = 0;
     }
@@ -1826,8 +2356,8 @@ public final class CompanionClientRuntime {
             lines = stripLeaderboardHeader(lines);
         }
 
-        if (lines.size() > ProtocolConstants.MAX_WIDGET_LINES) {
-            lines = new ArrayList<>(lines.subList(0, ProtocolConstants.MAX_WIDGET_LINES));
+        if (lines.size() > CosmicApiProtocolConstants.MAX_WIDGET_LINES) {
+            lines = new ArrayList<>(lines.subList(0, CosmicApiProtocolConstants.MAX_WIDGET_LINES));
         }
 
         if (lines.isEmpty()) {
@@ -1869,7 +2399,7 @@ public final class CompanionClientRuntime {
             }
 
             lines.add(parsedLine.asText());
-            if (lines.size() >= ProtocolConstants.MAX_WIDGET_LINES) {
+            if (lines.size() >= CosmicApiProtocolConstants.MAX_WIDGET_LINES) {
                 break;
             }
         }
@@ -4255,7 +4785,12 @@ public final class CompanionClientRuntime {
         return Math.max(0.0F, Math.min(1.0F, value));
     }
 
-    private record CoordsPingInfo(Vec3d pos, long expiresAtMillis, Identifier worldId) {
+    private record CoordsPingInfo(
+            Vec3d pos, long expiresAtMillis, Identifier worldId, String label) {
+        private CoordsPingInfo {
+            label = label == null ? "" : label.trim();
+        }
+
         private boolean isExpired() {
             return expiresAtMillis < System.currentTimeMillis();
         }
@@ -4297,18 +4832,21 @@ public final class CompanionClientRuntime {
      * @param pos the location of the new ping.
      */
     private void setCoordsPing(Vec3d pos) {
+        setCoordsPing(pos, "", COORDS_PING_LIFETIME_MILLIS);
+    }
+
+    private void setCoordsPing(Vec3d pos, String label, long lifetimeMillis) {
         MinecraftClient client = MinecraftClient.getInstance();
         client.execute(
                 () -> {
                     if (client.world == null) return;
 
                     Vec3d centered = new Vec3d(pos.x, pos.y, pos.z).add(COORDS_PING_BEAM_OFFSET);
-                    long expires =
-                            safeAddMillis(System.currentTimeMillis(), COORDS_PING_LIFETIME_MILLIS);
+                    long expires = safeAddMillis(System.currentTimeMillis(), lifetimeMillis);
                     Identifier worldId = client.world.getRegistryKey().getValue();
 
                     synchronized (this) {
-                        coordsPing = new CoordsPingInfo(centered, expires, worldId);
+                        coordsPing = new CoordsPingInfo(centered, expires, worldId, label);
                     }
 
                     if (client.player != null) {
@@ -4344,7 +4882,7 @@ public final class CompanionClientRuntime {
             gangTriggered = true;
         }
         if (gangTriggered) {
-            handlePingKeyPress(client, ProtocolConstants.PING_TYPE_GANG);
+            handlePingKeyPress(client, CosmicApiProtocolConstants.PING_TYPE_GANG);
         }
         gangPingKeyWasDown = gangDown;
 
@@ -4357,7 +4895,7 @@ public final class CompanionClientRuntime {
             truceTriggered = true;
         }
         if (truceTriggered) {
-            handlePingKeyPress(client, ProtocolConstants.PING_TYPE_TRUCE);
+            handlePingKeyPress(client, CosmicApiProtocolConstants.PING_TYPE_TRUCE);
         }
         trucePingKeyWasDown = truceDown;
     }
@@ -4375,7 +4913,12 @@ public final class CompanionClientRuntime {
     }
 
     private boolean sendPingIntent(int pingType) {
-        return sendC2S(new ProtocolMessage.PingIntentC2S(pingType));
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put(
+                "pingType",
+                pingType == CosmicApiProtocolConstants.PING_TYPE_TRUCE ? "truce" : "gang");
+        payload.put("legacyPingType", pingType);
+        return CosmicApiClientRuntime.getInstance().sendAction("ping.intent", payload);
     }
 
     private void emitPingBeaconParticles(MinecraftClient client) {
@@ -4784,13 +5327,16 @@ public final class CompanionClientRuntime {
         int centerX = (int) Math.round(normalizedX * screenWidth);
         int anchorY = (int) Math.round(normalizedY * screenHeight);
 
-        String name =
-                String.format(
-                        java.util.Locale.ROOT,
-                        "(%d, %d, %d)",
-                        (int) Math.floor(pos.x),
-                        (int) Math.floor(pos.y),
-                        (int) Math.floor(pos.z));
+        String name = info.label();
+        if (name.isBlank()) {
+            name =
+                    String.format(
+                            java.util.Locale.ROOT,
+                            "(%d, %d, %d)",
+                            (int) Math.floor(pos.x),
+                            (int) Math.floor(pos.y),
+                            (int) Math.floor(pos.z));
+        }
 
         drawPingBeaconLabel(
                 drawContext,
@@ -5038,259 +5584,367 @@ public final class CompanionClientRuntime {
         }
     }
 
-    private synchronized void attemptSendClientHello(MinecraftClient client) {
-        if (session.helloSent()
-                || client.player == null
-                || helloRetriesRemaining <= 0
-                || helloRetryCooldownTicks > 0) {
-            return;
+    private static Object firstPresent(Map<String, Object> values, String... keys) {
+        if (values == null || keys == null) {
+            return null;
         }
-
-        if (!isCompanionTargetServer(client)) {
-            return;
-        }
-
-        if (!ClientPlayNetworking.canSend(CompanionRawPayload.ID)) {
-            if (!helloUnavailableLogged) {
-                helloUnavailableLogged = true;
-                LOGGER.debug("ClientHello postponed because channel cannot send yet");
+        for (String key : keys) {
+            if (key != null && values.containsKey(key) && values.get(key) != null) {
+                return values.get(key);
             }
-            helloRetryCooldownTicks =
-                    Math.max(helloRetryCooldownTicks, CLIENT_HELLO_CHANNEL_UNAVAILABLE_RETRY_TICKS);
-            return;
         }
-
-        helloUnavailableLogged = false;
-        helloRetriesRemaining--;
-        String clientVersionPayload =
-                launcherProofProvider.applyTo(buildAttestation.asStructuredClientVersion());
-        ProtocolMessage.ClientHelloC2S hello =
-                new ProtocolMessage.ClientHelloC2S(
-                        clientVersionPayload, CLIENT_CAPABILITIES_BITSET);
-        if (sendC2S(hello)) {
-            session.markHelloSent();
-            disableHelloRetryState();
-            return;
-        }
-
-        if (helloRetriesRemaining > 0) {
-            helloRetryCooldownTicks = CLIENT_HELLO_RETRY_INTERVAL_TICKS;
-        }
+        return null;
     }
 
-    private synchronized boolean sendC2S(ProtocolMessage message) {
-        MinecraftClient client = MinecraftClient.getInstance();
-        companionSendAttempts++;
-
-        if (client.player == null) {
-            companionSendBlockedNoPlayer++;
+    private static boolean hasAnyKey(Map<String, Object> values, String... keys) {
+        if (values == null || keys == null) {
             return false;
         }
-
-        if (!isCompanionTargetServer(client)) {
-            companionSendBlockedTargetServer++;
-            return false;
-        }
-
-        if (!ClientPlayNetworking.canSend(CompanionRawPayload.ID)) {
-            companionSendBlockedChannelUnavailable++;
-            return false;
-        }
-
-        long now = System.currentTimeMillis();
-        if (!consumeCompanionSendPermit(now)) {
-            companionSendBlockedRateLimit++;
-            maybeLogCompanionRateLimit(now, client, message);
-            return false;
-        }
-
-        try {
-            byte[] bytes = protocolCodec.encode(message);
-            ClientPlayNetworking.send(new CompanionRawPayload(bytes));
-            companionSendSuccess++;
-            return true;
-        } catch (RuntimeException ex) {
-            companionSendBlockedEncoding++;
-            LOGGER.warn(
-                    "Failed to send companion payload messageType={}",
-                    message.getClass().getSimpleName(),
-                    ex);
-            return false;
-        }
-    }
-
-    private void initializeHelloRetryState() {
-        helloRetriesRemaining = CLIENT_HELLO_MAX_ATTEMPTS;
-        helloRetryCooldownTicks = 0;
-        helloUnavailableLogged = false;
-    }
-
-    private void disableHelloRetryState() {
-        helloRetriesRemaining = 0;
-        helloRetryCooldownTicks = 0;
-        helloUnavailableLogged = false;
-    }
-
-    private void resetCompanionSendDiagnostics() {
-        companionSendWindowStartAtMillis = 0L;
-        companionSendWindowCount = 0;
-        companionSendAttempts = 0L;
-        companionSendSuccess = 0L;
-        companionSendBlockedNoPlayer = 0L;
-        companionSendBlockedTargetServer = 0L;
-        companionSendBlockedChannelUnavailable = 0L;
-        companionSendBlockedRateLimit = 0L;
-        companionSendBlockedEncoding = 0L;
-        lastCompanionRateLimitWarnAtMillis = 0L;
-        lastCompanionDiagnosticsLogAtMillis = 0L;
-    }
-
-    private boolean consumeCompanionSendPermit(long nowMillis) {
-        if (companionSendWindowStartAtMillis <= 0L
-                || (nowMillis - companionSendWindowStartAtMillis) >= COMPANION_C2S_WINDOW_MILLIS) {
-            companionSendWindowStartAtMillis = nowMillis;
-            companionSendWindowCount = 0;
-        }
-
-        if (companionSendWindowCount >= COMPANION_C2S_MAX_PER_SECOND) {
-            return false;
-        }
-
-        companionSendWindowCount++;
-        return true;
-    }
-
-    private void maybeLogCompanionRateLimit(
-            long nowMillis, MinecraftClient client, ProtocolMessage message) {
-        if ((nowMillis - lastCompanionRateLimitWarnAtMillis)
-                < COMPANION_C2S_RATE_LIMIT_WARN_COOLDOWN_MILLIS) {
-            return;
-        }
-
-        lastCompanionRateLimitWarnAtMillis = nowMillis;
-        LOGGER.warn(
-                "Companion packet rate-limit active server={} messageType={} windowCount={} windowMs={}",
-                resolveCurrentServerAddress(client),
-                message.getClass().getSimpleName(),
-                companionSendWindowCount,
-                COMPANION_C2S_WINDOW_MILLIS);
-    }
-
-    private void maybeLogCompanionPacketDiagnostics(MinecraftClient client) {
-        if (!PACKET_DIAGNOSTICS_ENABLED) {
-            return;
-        }
-
-        long now = System.currentTimeMillis();
-        if ((now - lastCompanionDiagnosticsLogAtMillis)
-                < COMPANION_DIAGNOSTICS_LOG_INTERVAL_MILLIS) {
-            return;
-        }
-
-        lastCompanionDiagnosticsLogAtMillis = now;
-        LOGGER.info(
-                "Companion packet diagnostics server={} attempts={} sent={} blockedNoPlayer={} blockedTarget={} blockedChannel={} blockedRateLimit={} blockedEncoding={} helloSent={} helloRetriesRemaining={} helloCooldownTicks={}",
-                resolveCurrentServerAddress(client),
-                companionSendAttempts,
-                companionSendSuccess,
-                companionSendBlockedNoPlayer,
-                companionSendBlockedTargetServer,
-                companionSendBlockedChannelUnavailable,
-                companionSendBlockedRateLimit,
-                companionSendBlockedEncoding,
-                session.helloSent(),
-                helloRetriesRemaining,
-                helloRetryCooldownTicks);
-    }
-
-    private static String resolveCurrentServerAddress(MinecraftClient client) {
-        if (client == null) {
-            return "unknown";
-        }
-
-        ServerInfo currentServer = client.getCurrentServerEntry();
-        if (currentServer == null
-                || currentServer.address == null
-                || currentServer.address.isBlank()) {
-            return "unknown";
-        }
-
-        return currentServer.address;
-    }
-
-    private boolean isCompanionTargetServer(MinecraftClient client) {
-        if (client == null) {
-            return false;
-        }
-
-        ServerInfo currentServer = client.getCurrentServerEntry();
-        if (currentServer == null
-                || currentServer.address == null
-                || currentServer.address.isBlank()) {
-            return false;
-        }
-
-        String normalizedHost = normalizeServerAddressHost(currentServer.address);
-        if (normalizedHost.isEmpty()) {
-            return false;
-        }
-
-        CompanionConfig currentConfig = getConfig();
-        for (String allowedServerId : currentConfig.allowedServerIds) {
-            if (matchesAllowedServerId(normalizedHost, allowedServerId)) {
+        for (String key : keys) {
+            if (key != null && values.containsKey(key)) {
                 return true;
             }
         }
-
         return false;
     }
 
-    private static boolean matchesAllowedServerId(String normalizedHost, String allowedServerId) {
-        String normalizedAllowed = normalizeServerAddressHost(allowedServerId);
-        if (normalizedAllowed.isEmpty()) {
-            return false;
+    private static Map<String, Object> waypointPayload(Map<String, Object> payload) {
+        Map<String, Object> merged = new LinkedHashMap<>();
+        Object nestedSource = firstPresent(payload, "waypoint", "location", "position", "pos");
+        Map<String, Object> nestedMap = objectMap(nestedSource);
+        if (nestedMap != null) {
+            merged.putAll(nestedMap);
         }
 
-        return normalizedHost.equals(normalizedAllowed)
-                || normalizedHost.endsWith("." + normalizedAllowed);
+        List<Map<String, Object>> waypointMaps =
+                mapList(payload == null ? null : payload.get("waypoints"));
+        if (!waypointMaps.isEmpty()) {
+            merged.putAll(waypointMaps.getFirst());
+        }
+
+        if (payload != null) {
+            merged.putAll(payload);
+        }
+        return merged;
     }
 
-    private static String normalizeServerAddressHost(String address) {
-        if (address == null) {
+    private static CosmicApiRuntimePayloads.HudWidget hudWidgetFromPayload(
+            String widgetId, Map<String, Object> payload) {
+        List<String> lines = stringList(firstPresent(payload, "lines", "rows", "text", "line"));
+        int ttlSeconds = intValue(firstPresent(payload, "ttlSeconds", "ttl", "ttlSecs"), 0);
+        int ttlMs = intValue(firstPresent(payload, "ttlMs", "expiresInMs"), -1);
+        if (ttlSeconds <= 0 && ttlMs > 0) {
+            ttlSeconds = Math.max(1, ttlMs / 1000);
+        }
+
+        return new CosmicApiRuntimePayloads.HudWidget(widgetId, lines, ttlSeconds);
+    }
+
+    private static CosmicApiRuntimePayloads.InventoryItemOverlay inventoryOverlayFromPayload(
+            Map<String, Object> payload) {
+        int slot = intValue(firstPresent(payload, "slot", "slotIndex", "index"), -1);
+        int overlayType = overlayType(firstPresent(payload, "overlayType", "type", "kind"));
+        String displayText =
+                stringValue(firstPresent(payload, "displayText", "text", "label", "value"));
+        if (slot < 0 || overlayType <= 0) {
+            return null;
+        }
+
+        return new CosmicApiRuntimePayloads.InventoryItemOverlay(slot, overlayType, displayText);
+    }
+
+    private static Map<String, Object> singleNestedPayload(
+            Map<String, Object> payload, String... nestedKeys) {
+        Map<String, Object> merged = new LinkedHashMap<>();
+        Object nestedSource = firstPresent(payload, nestedKeys);
+        Map<String, Object> nestedMap = objectMap(nestedSource);
+        if (nestedMap != null) {
+            merged.putAll(nestedMap);
+        }
+        if (payload != null) {
+            merged.putAll(payload);
+        }
+        return merged;
+    }
+
+    private static Vec3d waypointPosition(Map<String, Object> payload) {
+        double x = doubleValue(firstPresent(payload, "x", "blockX", "block_x"), Double.NaN);
+        double y = doubleValue(firstPresent(payload, "y", "blockY", "block_y"), Double.NaN);
+        double z = doubleValue(firstPresent(payload, "z", "blockZ", "block_z"), Double.NaN);
+        if (Double.isFinite(x) && Double.isFinite(y) && Double.isFinite(z)) {
+            return new Vec3d(x, y, z);
+        }
+
+        Object coordinateSource = firstPresent(payload, "coordinates", "coords", "xyz");
+        List<Double> coordinates = doubleList(coordinateSource);
+        if (coordinates.size() >= 3) {
+            return new Vec3d(coordinates.get(0), coordinates.get(1), coordinates.get(2));
+        }
+
+        return null;
+    }
+
+    private static long waypointLifetimeMillis(Map<String, Object> payload) {
+        long ttlMillis = longValue(firstPresent(payload, "ttlMillis", "ttlMs", "expiresInMs"), -1L);
+        if (ttlMillis <= 0L) {
+            long ttlSeconds =
+                    longValue(firstPresent(payload, "ttlSeconds", "ttl", "expiresInSeconds"), -1L);
+            if (ttlSeconds > 0L) {
+                ttlMillis = ttlSeconds * MILLIS_PER_SECOND;
+            }
+        }
+        if (ttlMillis <= 0L) {
+            return COORDS_PING_LIFETIME_MILLIS;
+        }
+
+        long maxLifetimeMillis = 30L * 60L * MILLIS_PER_SECOND;
+        return Math.max(MILLIS_PER_SECOND, Math.min(ttlMillis, maxLifetimeMillis));
+    }
+
+    private static Map<String, Object> objectMap(Object value) {
+        if (!(value instanceof Map<?, ?> rawMap)) {
+            return null;
+        }
+
+        Map<String, Object> values = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> entry : rawMap.entrySet()) {
+            if (entry.getKey() == null) {
+                continue;
+            }
+            values.put(String.valueOf(entry.getKey()), entry.getValue());
+        }
+        return values;
+    }
+
+    private static List<Double> doubleList(Object value) {
+        if (value == null) {
+            return List.of();
+        }
+        if (value instanceof List<?> rawList) {
+            List<Double> values = new ArrayList<>(rawList.size());
+            for (Object entry : rawList) {
+                double parsed = doubleValue(entry, Double.NaN);
+                if (Double.isFinite(parsed)) {
+                    values.add(parsed);
+                }
+            }
+            return values;
+        }
+
+        String text = stringValue(value);
+        if (text.isBlank()) {
+            return List.of();
+        }
+        List<Double> values = new ArrayList<>();
+        for (String part : text.split("[,\\s]+")) {
+            double parsed = doubleValue(part, Double.NaN);
+            if (Double.isFinite(parsed)) {
+                values.add(parsed);
+            }
+        }
+        return values;
+    }
+
+    private static List<Map<String, Object>> mapList(Object value) {
+        if (!(value instanceof List<?> rawList)) {
+            return List.of();
+        }
+
+        List<Map<String, Object>> values = new ArrayList<>();
+        for (Object entry : rawList) {
+            Map<String, Object> entryMap = objectMap(entry);
+            if (entryMap != null) {
+                values.add(entryMap);
+            }
+        }
+        return values;
+    }
+
+    private static List<String> stringList(Object value) {
+        if (value == null) {
+            return List.of();
+        }
+        if (value instanceof List<?> rawList) {
+            List<String> values = new ArrayList<>(rawList.size());
+            for (Object entry : rawList) {
+                values.add(stringValue(entry));
+            }
+            return values;
+        }
+
+        String text = stringValue(value);
+        if (text.isEmpty()) {
+            return List.of();
+        }
+        if (!text.contains("\n") && !text.contains("\r")) {
+            return List.of(text);
+        }
+
+        List<String> values = new ArrayList<>();
+        for (String line : text.split("\\R")) {
+            values.add(line);
+        }
+        return values;
+    }
+
+    private static List<Integer> intList(Object value) {
+        if (value == null) {
+            return List.of();
+        }
+        if (value instanceof List<?> rawList) {
+            List<Integer> values = new ArrayList<>(rawList.size());
+            for (Object entry : rawList) {
+                int parsed = intValue(entry, -1);
+                if (parsed >= 0) {
+                    values.add(parsed);
+                }
+            }
+            return values;
+        }
+
+        if (value instanceof Number) {
+            int parsed = intValue(value, -1);
+            return parsed >= 0 ? List.of(parsed) : List.of();
+        }
+
+        String text = stringValue(value);
+        if (text.isBlank()) {
+            return List.of();
+        }
+        List<Integer> values = new ArrayList<>();
+        for (String part : text.split("[,\\s]+")) {
+            int parsed = intValue(part, -1);
+            if (parsed >= 0) {
+                values.add(parsed);
+            }
+        }
+        return values;
+    }
+
+    private static String stringValue(Object value) {
+        if (value == null) {
             return "";
         }
+        return String.valueOf(value).trim();
+    }
 
-        String normalized = address.trim().toLowerCase(java.util.Locale.ROOT);
-        if (normalized.isEmpty()) {
+    private static int intValue(Object value, int fallback) {
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        String text = stringValue(value);
+        if (text.isBlank()) {
+            return fallback;
+        }
+        try {
+            return (int) Math.round(Double.parseDouble(text));
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
+    }
+
+    private static long longValue(Object value, long fallback) {
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        String text = stringValue(value);
+        if (text.isBlank()) {
+            return fallback;
+        }
+        try {
+            return Math.round(Double.parseDouble(text));
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
+    }
+
+    private static double doubleValue(Object value, double fallback) {
+        if (value instanceof Number number) {
+            return number.doubleValue();
+        }
+        String text = stringValue(value);
+        if (text.isBlank()) {
+            return fallback;
+        }
+        try {
+            return Double.parseDouble(text);
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
+    }
+
+    private static boolean booleanValue(Object value, boolean fallback) {
+        if (value instanceof Boolean bool) {
+            return bool;
+        }
+        if (value instanceof Number number) {
+            return number.doubleValue() != 0D;
+        }
+        String text = stringValue(value);
+        if (text.isBlank()) {
+            return fallback;
+        }
+        return isTruthy(text);
+    }
+
+    private static int overlayType(Object value) {
+        int numeric = intValue(value, -1);
+        if (numeric > 0) {
+            return numeric;
+        }
+
+        return switch (normalizeApiToken(stringValue(value))) {
+            case "cosmic.energy", "energy" -> CosmicApiProtocolConstants.OVERLAY_TYPE_COSMIC_ENERGY;
+            case "money.note", "money" -> CosmicApiProtocolConstants.OVERLAY_TYPE_MONEY_NOTE;
+            case "gang.point.note", "gang.points", "gang.point" ->
+                    CosmicApiProtocolConstants.OVERLAY_TYPE_GANG_POINT_NOTE;
+            case "satchel.percent", "satchel" ->
+                    CosmicApiProtocolConstants.OVERLAY_TYPE_SATCHEL_PERCENT;
+            case "pet.active" -> CosmicApiProtocolConstants.OVERLAY_TYPE_PET_ACTIVE;
+            case "pet.cooldown" -> CosmicApiProtocolConstants.OVERLAY_TYPE_PET_COOLDOWN;
+            default -> -1;
+        };
+    }
+
+    private static int markerType(Object value) {
+        int numeric = intValue(value, -1);
+        if (numeric > 0) {
+            return numeric;
+        }
+
+        return switch (normalizeApiToken(stringValue(value))) {
+            case "same.gang", "gang.member" -> CosmicApiProtocolConstants.MARKER_TYPE_SAME_GANG;
+            case "peaceful.mining", "peaceful.mining.pass.through", "pass.through" ->
+                    CosmicApiProtocolConstants.MARKER_TYPE_PEACEFUL_MINING_PASS_THROUGH;
+            case "gang.ping", "gang.ping.beacon" ->
+                    CosmicApiProtocolConstants.MARKER_TYPE_GANG_PING_BEACON;
+            case "truce.ping", "truce.ping.beacon" ->
+                    CosmicApiProtocolConstants.MARKER_TYPE_TRUCE_PING_BEACON;
+            default -> -1;
+        };
+    }
+
+    private static String normalizeApiToken(String value) {
+        if (value == null) {
             return "";
         }
-
-        int schemeSeparator = normalized.indexOf("://");
-        if (schemeSeparator >= 0 && schemeSeparator + 3 < normalized.length()) {
-            normalized = normalized.substring(schemeSeparator + 3);
+        String normalized =
+                value.trim()
+                        .replace('-', '.')
+                        .replace('_', '.')
+                        .replace(' ', '.')
+                        .replace('/', '.')
+                        .replace(':', '.')
+                        .toLowerCase(java.util.Locale.ROOT);
+        while (normalized.contains("..")) {
+            normalized = normalized.replace("..", ".");
         }
-
-        int pathSeparator = normalized.indexOf('/');
-        if (pathSeparator >= 0) {
-            normalized = normalized.substring(0, pathSeparator);
+        while (normalized.startsWith(".")) {
+            normalized = normalized.substring(1);
         }
-
-        if (normalized.startsWith("[")) {
-            int closingBracket = normalized.indexOf(']');
-            if (closingBracket > 0) {
-                normalized = normalized.substring(1, closingBracket);
-            }
-        } else {
-            int lastColon = normalized.lastIndexOf(':');
-            if (lastColon > 0 && normalized.indexOf(':') == lastColon) {
-                normalized = normalized.substring(0, lastColon);
-            }
-        }
-
         while (normalized.endsWith(".")) {
             normalized = normalized.substring(0, normalized.length() - 1);
         }
-
         return normalized;
     }
 
@@ -5310,20 +5964,6 @@ public final class CompanionClientRuntime {
                 || "on".equalsIgnoreCase(normalized);
     }
 
-    private synchronized void logMalformedOncePerConnection(BinaryDecodingException ex) {
-        CompanionConfig currentConfig = getConfig();
-
-        if (currentConfig.logMalformedOncePerConnection && session.malformedPacketLogged()) {
-            return;
-        }
-
-        if (currentConfig.logMalformedOncePerConnection) {
-            session.markMalformedPacketLogged();
-        }
-
-        LOGGER.warn("Dropped malformed companion payload: {}", ex.getMessage());
-    }
-
     private synchronized void ensureFeatureDefaultsPersisted() {
         CompanionConfig currentConfig = getConfig();
         boolean changed = false;
@@ -5336,7 +5976,7 @@ public final class CompanionClientRuntime {
         }
 
         if (changed) {
-            configManager.save(currentConfig);
+            configManager().save(currentConfig);
             config = currentConfig;
         }
     }
@@ -5355,10 +5995,17 @@ public final class CompanionClientRuntime {
 
     private CompanionConfig getConfig() {
         if (config == null) {
-            config = configManager.getOrLoad();
+            config = configManager().getOrLoad();
         }
 
         return config;
+    }
+
+    private CompanionConfigManager configManager() {
+        if (configManager == null) {
+            configManager = new CompanionConfigManager();
+        }
+        return configManager;
     }
 
     private boolean getFeatureToggleState(String featureId) {
@@ -5379,7 +6026,7 @@ public final class CompanionClientRuntime {
             return true;
         }
 
-        if (!session.gateState().isEnabled()) {
+        if (!session.isEnabled()) {
             return false;
         }
 
@@ -5388,14 +6035,14 @@ public final class CompanionClientRuntime {
     }
 
     private boolean shouldRenderAnyInventoryItemOverlays() {
-        return session.gateState().isEnabled()
+        return session.isEnabled()
                 && session.inventoryItemOverlaysSupported()
                 && (getFeatureToggleState(ClientFeatures.INVENTORY_ITEM_OVERLAYS_ID)
                         || getFeatureToggleState(ClientFeatures.HUD_PETS_ID));
     }
 
     private boolean shouldRenderOverlayType(int overlayType) {
-        if (!session.gateState().isEnabled() || !session.inventoryItemOverlaysSupported()) {
+        if (!session.isEnabled() || !session.inventoryItemOverlaysSupported()) {
             return false;
         }
 
@@ -5405,8 +6052,8 @@ public final class CompanionClientRuntime {
     }
 
     private static boolean isPetOverlayType(int overlayType) {
-        return overlayType == ProtocolConstants.OVERLAY_TYPE_PET_ACTIVE
-                || overlayType == ProtocolConstants.OVERLAY_TYPE_PET_COOLDOWN;
+        return overlayType == CosmicApiProtocolConstants.OVERLAY_TYPE_PET_ACTIVE
+                || overlayType == CosmicApiProtocolConstants.OVERLAY_TYPE_PET_COOLDOWN;
     }
 
     private boolean shouldRenderWidget(String featureId) {
@@ -5414,7 +6061,7 @@ public final class CompanionClientRuntime {
     }
 
     private boolean shouldRenderHudWidgets() {
-        return session.gateState().isEnabled() && session.hudWidgetsSupported();
+        return session.isEnabled() && session.hudWidgetsSupported();
     }
 
     private boolean shouldHandlePingKeybinds(MinecraftClient client) {
@@ -5425,7 +6072,7 @@ public final class CompanionClientRuntime {
         return client != null
                 && client.player != null
                 && client.world != null
-                && session.gateState().isEnabled()
+                && session.isEnabled()
                 && getFeatureToggleState(ClientFeatures.PINGS_ID)
                 && (isFeatureSupportedByServer(ClientFeatures.PINGS_ID)
                         || !session.gangPingBeaconIdsSnapshot().isEmpty()
@@ -5437,10 +6084,9 @@ public final class CompanionClientRuntime {
     private boolean canSendPingIntent(MinecraftClient client) {
         return client != null
                 && client.player != null
-                && session.gateState().isEnabled()
+                && CosmicApiClientRuntime.getInstance().isSessionActive()
                 && getFeatureToggleState(ClientFeatures.PINGS_ID)
-                && isFeatureSupportedByServer(ClientFeatures.PINGS_ID)
-                && ClientPlayNetworking.canSend(CompanionRawPayload.ID);
+                && isFeatureSupportedByServer(ClientFeatures.PINGS_ID);
     }
 
     private void maybeSendPingUnavailableFeedback(MinecraftClient client) {
@@ -5454,7 +6100,7 @@ public final class CompanionClientRuntime {
         }
         lastPingFeedbackAtMillis = now;
 
-        if (!session.gateState().isEnabled()) {
+        if (!session.isEnabled()) {
             sendClientMessage(
                     client, Text.translatable("text.cosmicprisonsmod.pings.unavailable.handshake"));
             return;
@@ -5520,7 +6166,7 @@ public final class CompanionClientRuntime {
             return false;
         }
 
-        if (!session.gateState().isEnabled()
+        if (!session.isEnabled()
                 || !isFeatureSupportedByServer(ClientFeatures.PEACEFUL_MINING_ID)
                 || !getFeatureToggleState(ClientFeatures.PEACEFUL_MINING_ID)) {
             return false;
@@ -5582,24 +6228,24 @@ public final class CompanionClientRuntime {
 
     private static int colorForOverlayType(int overlayType) {
         return switch (overlayType) {
-            case ProtocolConstants.OVERLAY_TYPE_COSMIC_ENERGY -> 0xFF5DE6FF;
-            case ProtocolConstants.OVERLAY_TYPE_MONEY_NOTE -> 0xFF84F08F;
-            case ProtocolConstants.OVERLAY_TYPE_GANG_POINT_NOTE -> 0xFFFFC659;
-            case ProtocolConstants.OVERLAY_TYPE_SATCHEL_PERCENT -> 0xFFB5E86C;
-            case ProtocolConstants.OVERLAY_TYPE_PET_ACTIVE -> 0xFF8BF5C2;
-            case ProtocolConstants.OVERLAY_TYPE_PET_COOLDOWN -> 0xFFFFB27D;
+            case CosmicApiProtocolConstants.OVERLAY_TYPE_COSMIC_ENERGY -> 0xFF5DE6FF;
+            case CosmicApiProtocolConstants.OVERLAY_TYPE_MONEY_NOTE -> 0xFF84F08F;
+            case CosmicApiProtocolConstants.OVERLAY_TYPE_GANG_POINT_NOTE -> 0xFFFFC659;
+            case CosmicApiProtocolConstants.OVERLAY_TYPE_SATCHEL_PERCENT -> 0xFFB5E86C;
+            case CosmicApiProtocolConstants.OVERLAY_TYPE_PET_ACTIVE -> 0xFF8BF5C2;
+            case CosmicApiProtocolConstants.OVERLAY_TYPE_PET_COOLDOWN -> 0xFFFFB27D;
             default -> 0xFFE6E6E6;
         };
     }
 
     private static int backgroundColorForOverlayType(int overlayType) {
         return switch (overlayType) {
-            case ProtocolConstants.OVERLAY_TYPE_COSMIC_ENERGY -> 0xA01E3F52;
-            case ProtocolConstants.OVERLAY_TYPE_MONEY_NOTE -> 0xA01B3C25;
-            case ProtocolConstants.OVERLAY_TYPE_GANG_POINT_NOTE -> 0xA04A361A;
-            case ProtocolConstants.OVERLAY_TYPE_SATCHEL_PERCENT -> 0xA0284A1E;
-            case ProtocolConstants.OVERLAY_TYPE_PET_ACTIVE -> 0xA01D4733;
-            case ProtocolConstants.OVERLAY_TYPE_PET_COOLDOWN -> 0xA04E2A1B;
+            case CosmicApiProtocolConstants.OVERLAY_TYPE_COSMIC_ENERGY -> 0xA01E3F52;
+            case CosmicApiProtocolConstants.OVERLAY_TYPE_MONEY_NOTE -> 0xA01B3C25;
+            case CosmicApiProtocolConstants.OVERLAY_TYPE_GANG_POINT_NOTE -> 0xA04A361A;
+            case CosmicApiProtocolConstants.OVERLAY_TYPE_SATCHEL_PERCENT -> 0xA0284A1E;
+            case CosmicApiProtocolConstants.OVERLAY_TYPE_PET_ACTIVE -> 0xA01D4733;
+            case CosmicApiProtocolConstants.OVERLAY_TYPE_PET_COOLDOWN -> 0xA04E2A1B;
             default -> 0xA0333333;
         };
     }

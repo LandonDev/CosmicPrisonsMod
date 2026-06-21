@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "id": "cosmicprisonsmod",
   "version": "${version}",
-  "name": "Cosmic Prisons Server Companion",
-  "description": "Optional Fabric client companion for server-authoritative Cosmic Prisons UI.",
+  "name": "Cosmic Prisons Official Mod",
+  "description": "Optional Fabric client mod for Cosmic API powered Cosmic Prisons features.",
   "authors": [
     "Landon"
   ],

@@ -9,15 +9,14 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import me.landon.companion.protocol.ProtocolConstants;
-import me.landon.companion.protocol.ProtocolMessage;
-import me.landon.companion.session.ConnectionGateState;
+import me.landon.cosmicapi.protocol.CosmicApiProtocolConstants;
+import me.landon.cosmicapi.protocol.CosmicApiRuntimePayloads;
 
 /**
- * Mutable per-connection client state populated from server companion payloads.
+ * Mutable per-connection client state populated from Cosmic API payloads.
  *
  * <p>This class is reset on disconnect and owns transient runtime data such as widget snapshots,
- * item overlays, marker ids, and handshake tracking.
+ * item overlays, marker ids, and session metadata.
  */
 public final class ConnectionSessionState {
     /** Lightweight overlay snapshot for a single inventory slot. */
@@ -30,10 +29,10 @@ public final class ConnectionSessionState {
         }
     }
 
-    private final ConnectionGateState gateState = new ConnectionGateState();
     private final Map<Integer, ItemOverlayEntry> inventoryItemOverlays = new LinkedHashMap<>();
     private final Map<String, HudWidgetEntry> hudWidgets = new LinkedHashMap<>();
     private final IntSet peacefulMiningPassThroughIds = new IntOpenHashSet();
+    private final IntSet sameGangEntityIds = new IntOpenHashSet();
     private final IntSet gangPingBeaconIds = new IntOpenHashSet();
     private final IntSet trucePingBeaconIds = new IntOpenHashSet();
 
@@ -41,38 +40,36 @@ public final class ConnectionSessionState {
     private String serverPluginVersion = "";
     private int serverFeatureFlags;
 
-    private boolean helloSent;
-    private boolean malformedPacketLogged;
+    private boolean enabled;
     private boolean hudWidgetsSupported;
     private boolean inventoryItemOverlaysSupported;
 
-    /** Returns the handshake gate state used to authorize companion message processing. */
-    public ConnectionGateState gateState() {
-        return gateState;
-    }
-
     /** Clears all handshake/session fields and payload snapshots for a new connection. */
     public void reset() {
-        gateState.reset();
         clearInventoryItemOverlays();
         clearHudWidgets();
         clearPeacefulMiningPassThroughIds();
+        clearSameGangEntityIds();
         clearGangPingBeaconIds();
         clearTrucePingBeaconIds();
         serverId = "";
         serverPluginVersion = "";
         serverFeatureFlags = 0;
-        helloSent = false;
-        malformedPacketLogged = false;
+        enabled = false;
         hudWidgetsSupported = false;
         inventoryItemOverlaysSupported = false;
     }
 
-    /** Stores authoritative server hello metadata from the validated handshake frame. */
-    public void setServerHello(ProtocolMessage.ServerHelloS2C hello) {
-        serverId = hello.serverId();
-        serverPluginVersion = hello.serverPluginVersion();
-        serverFeatureFlags = hello.serverFeatureFlagsBitset();
+    public void enableCosmicApiSession(
+            String serverId, String serverPluginVersion, int featureFlags) {
+        this.serverId = serverId == null ? "" : serverId;
+        this.serverPluginVersion = serverPluginVersion == null ? "" : serverPluginVersion;
+        this.serverFeatureFlags = featureFlags;
+        this.enabled = true;
+    }
+
+    public boolean isEnabled() {
+        return enabled;
     }
 
     public String serverId() {
@@ -108,21 +105,38 @@ public final class ConnectionSessionState {
      *
      * <p>Invalid slots are ignored.
      */
-    public void replaceInventoryItemOverlays(List<ProtocolMessage.InventoryItemOverlay> overlays) {
+    public void replaceInventoryItemOverlays(
+            List<CosmicApiRuntimePayloads.InventoryItemOverlay> overlays) {
         inventoryItemOverlays.clear();
 
-        for (ProtocolMessage.InventoryItemOverlay overlay : overlays) {
-            int normalizedSlot = normalizePlayerStorageSlot(overlay.slot());
-
-            if (normalizedSlot < PLAYER_STORAGE_MIN_SLOT
-                    || normalizedSlot > PLAYER_STORAGE_MAX_SLOT) {
-                continue;
-            }
-
-            inventoryItemOverlays.put(
-                    normalizedSlot,
-                    new ItemOverlayEntry(overlay.overlayType(), overlay.displayText()));
+        for (CosmicApiRuntimePayloads.InventoryItemOverlay overlay : overlays) {
+            upsertInventoryItemOverlay(overlay);
         }
+    }
+
+    public void upsertInventoryItemOverlay(CosmicApiRuntimePayloads.InventoryItemOverlay overlay) {
+        if (overlay == null) {
+            return;
+        }
+
+        int normalizedSlot = normalizePlayerStorageSlot(overlay.slot());
+
+        if (normalizedSlot < PLAYER_STORAGE_MIN_SLOT || normalizedSlot > PLAYER_STORAGE_MAX_SLOT) {
+            return;
+        }
+
+        inventoryItemOverlays.put(
+                normalizedSlot, new ItemOverlayEntry(overlay.overlayType(), overlay.displayText()));
+    }
+
+    public void removeInventoryItemOverlay(int slot) {
+        int normalizedSlot = normalizePlayerStorageSlot(slot);
+
+        if (normalizedSlot < PLAYER_STORAGE_MIN_SLOT || normalizedSlot > PLAYER_STORAGE_MAX_SLOT) {
+            return;
+        }
+
+        inventoryItemOverlays.remove(normalizedSlot);
     }
 
     public void clearInventoryItemOverlays() {
@@ -134,31 +148,43 @@ public final class ConnectionSessionState {
      *
      * <p>Null widget ids and over-limit lines are discarded to preserve protocol bounds.
      */
-    public void replaceHudWidgets(List<ProtocolMessage.HudWidget> widgets) {
+    public void replaceHudWidgets(List<CosmicApiRuntimePayloads.HudWidget> widgets) {
         hudWidgets.clear();
-        long receivedAt = System.currentTimeMillis();
 
-        for (ProtocolMessage.HudWidget widget : widgets) {
-            if (widget == null) {
-                continue;
-            }
-
-            String widgetId = normalizeWidgetId(widget.widgetId());
-            if (widgetId.isEmpty()) {
-                continue;
-            }
-
-            List<String> lines = new ArrayList<>(widget.lines().size());
-            for (String line : widget.lines()) {
-                lines.add(line == null ? "" : line);
-                if (lines.size() >= ProtocolConstants.MAX_WIDGET_LINES) {
-                    break;
-                }
-            }
-
-            int ttlSeconds = Math.max(0, widget.ttlSeconds());
-            hudWidgets.put(widgetId, new HudWidgetEntry(lines, ttlSeconds, receivedAt));
+        for (CosmicApiRuntimePayloads.HudWidget widget : widgets) {
+            upsertHudWidget(widget);
         }
+    }
+
+    public void upsertHudWidget(CosmicApiRuntimePayloads.HudWidget widget) {
+        if (widget == null) {
+            return;
+        }
+
+        String widgetId = normalizeWidgetId(widget.widgetId());
+        if (widgetId.isEmpty()) {
+            return;
+        }
+
+        List<String> lines = new ArrayList<>(widget.lines().size());
+        for (String line : widget.lines()) {
+            lines.add(line == null ? "" : line);
+            if (lines.size() >= CosmicApiProtocolConstants.MAX_WIDGET_LINES) {
+                break;
+            }
+        }
+
+        int ttlSeconds = Math.max(0, widget.ttlSeconds());
+        hudWidgets.put(widgetId, new HudWidgetEntry(lines, ttlSeconds, System.currentTimeMillis()));
+    }
+
+    public void removeHudWidget(String widgetId) {
+        String normalizedWidgetId = normalizeWidgetId(widgetId);
+        if (normalizedWidgetId.isEmpty()) {
+            return;
+        }
+
+        hudWidgets.remove(normalizedWidgetId);
     }
 
     public void clearHudWidgets() {
@@ -209,6 +235,24 @@ public final class ConnectionSessionState {
         peacefulMiningPassThroughIds.clear();
     }
 
+    /** Applies an add/remove delta for same-gang entity markers. */
+    public void applySameGangEntityDelta(
+            List<Integer> addEntityIds, List<Integer> removeEntityIds) {
+        applyEntityIdDelta(sameGangEntityIds, addEntityIds, removeEntityIds);
+    }
+
+    public boolean isSameGangEntity(int entityId) {
+        return entityId >= 0 && sameGangEntityIds.contains(entityId);
+    }
+
+    public IntSet sameGangEntityIdsSnapshot() {
+        return IntSets.unmodifiable(new IntOpenHashSet(sameGangEntityIds));
+    }
+
+    public void clearSameGangEntityIds() {
+        sameGangEntityIds.clear();
+    }
+
     /** Applies an add/remove delta for gang ping beacon entities. */
     public void applyGangPingBeaconDelta(
             List<Integer> addEntityIds, List<Integer> removeEntityIds) {
@@ -243,22 +287,6 @@ public final class ConnectionSessionState {
 
     public Map<Integer, ItemOverlayEntry> inventoryItemOverlaysSnapshot() {
         return Collections.unmodifiableMap(new LinkedHashMap<>(inventoryItemOverlays));
-    }
-
-    public boolean helloSent() {
-        return helloSent;
-    }
-
-    public void markHelloSent() {
-        this.helloSent = true;
-    }
-
-    public boolean malformedPacketLogged() {
-        return malformedPacketLogged;
-    }
-
-    public void markMalformedPacketLogged() {
-        this.malformedPacketLogged = true;
     }
 
     /**

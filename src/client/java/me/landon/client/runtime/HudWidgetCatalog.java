@@ -155,6 +155,39 @@ public final class HudWidgetCatalog {
                     "text.cosmicprisonsmod.hud.leaderboard_cycle.title",
                     0xFF9AB1D9,
                     LEADERBOARD_GIFT.previewLines());
+    private static final WidgetDescriptor COMP_SCOREBOARD =
+            new WidgetDescriptor(
+                    CompanionConfig.HUD_WIDGET_COMP_SCOREBOARD_ID,
+                    ClientFeatures.SERVER_WIDGETS_ID,
+                    "text.cosmicprisonsmod.hud.comp_scoreboard.title",
+                    0xFF66D2C8,
+                    List.of("Competition", "Time: 4m 20s", "", "1. Landon (1,240)"));
+    private static final WidgetDescriptor PRISONBREAK_SCOREBOARD =
+            new WidgetDescriptor(
+                    CompanionConfig.HUD_WIDGET_PRISONBREAK_SCOREBOARD_ID,
+                    ClientFeatures.SERVER_WIDGETS_ID,
+                    "text.cosmicprisonsmod.hud.prisonbreak_scoreboard.title",
+                    0xFFFF6D7E,
+                    List.of(
+                            "Prison Break",
+                            "Time: 2m 40s",
+                            "Points: 1,240",
+                            "1. Landon",
+                            "2. Nova"));
+    private static final WidgetDescriptor PRISONBREAK_COOLDOWNS =
+            new WidgetDescriptor(
+                    CompanionConfig.HUD_WIDGET_PRISONBREAK_COOLDOWNS_ID,
+                    ClientFeatures.SERVER_WIDGETS_ID,
+                    "text.cosmicprisonsmod.hud.prisonbreak_cooldowns.title",
+                    0xFFFFB760,
+                    List.of("Movement Speed: +12%", "Knockback: 18s", "Guard Break: 42s"));
+    private static final WidgetDescriptor PRISONBREAK_PROCS =
+            new WidgetDescriptor(
+                    CompanionConfig.HUD_WIDGET_PRISONBREAK_PROCS_ID,
+                    ClientFeatures.SERVER_WIDGETS_ID,
+                    "text.cosmicprisonsmod.hud.prisonbreak_procs.title",
+                    0xFF81DFFF,
+                    List.of("Shatter II triggered", "Momentum +120", "Guard staggered"));
 
     private static final List<WidgetDescriptor> LEADERBOARDS =
             List.of(LEADERBOARD_GIFT, LEADERBOARD_GANG, LEADERBOARD_BLOCKS, LEADERBOARD_LEVEL);
@@ -166,6 +199,10 @@ public final class HudWidgetCatalog {
                     EVENTS,
                     SATCHELS,
                     GANG,
+                    COMP_SCOREBOARD,
+                    PRISONBREAK_SCOREBOARD,
+                    PRISONBREAK_COOLDOWNS,
+                    PRISONBREAK_PROCS,
                     LEADERBOARD_GIFT,
                     LEADERBOARD_GANG,
                     LEADERBOARD_BLOCKS,

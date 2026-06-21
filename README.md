@@ -1,4 +1,4 @@
-# Cosmic Prisons Server Companion (Fabric Client Mod)
+# Cosmic Prisons Official Mod (Fabric Client Mod)
 
 <p align="center">
   <a href="https://github.com/LandonDev/CosmicPrisonsMod/releases/download/launcher-latest/CosmicPrisons-Mod-Launcher.exe">
@@ -13,7 +13,7 @@
 </p>
 
 ## What This Project Is
-Cosmic Prisons Server Companion is an optional Fabric client mod for Cosmic Prisons players. The mod handles client-side UI and helper behavior that is driven by server data, so the server stays authoritative and the client stays safe when data or capabilities are missing.
+Cosmic Prisons Official Mod is an optional Fabric client mod for Cosmic Prisons players. The mod uses the Cosmic API broker for server-scoped data and player-approved hooks, so the server stays authoritative and the client stays safe when data or capabilities are missing.
 
 This repository is for mod contributions and feature proposals. It is not the place for launcher internals, private release tooling, deployment secrets, or server plugin source.
 
@@ -28,7 +28,7 @@ When a change needs server work, include a `Server Requirements` section in your
 If server support is required and not yet available, call that out explicitly so reviewers and server developers can plan rollout correctly.
 
 ## Official Builds
-Only maintainers can publish official builds. Official builds are signed and released through the project release process, and that trust chain is what companion verification relies on.
+Only maintainers can publish official builds. Official builds are signed and released through the project release process.
 
 Community forks and local builds are valuable for development and suggestions, but they are not official releases and should not be represented as official in-game.
 

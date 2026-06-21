@@ -1,6 +1,6 @@
 {
   "key.category.cosmicprisonsmod.pings": "Pins",
-  "text.cosmicprisonsmod.server_not_allowed": "Companion blocked: serverId '%s' is not in allowedServerIds",
+  "text.cosmicprisonsmod.server_not_allowed": "Cosmic API blocked: serverId '%s' is not in allowedServerIds",
   "text.cosmicprisonsmod.settings.title": "Cosmic Prisons Mod Settings",
   "text.cosmicprisonsmod.settings.subtitle": "Toggle modules, inspect details, and reposition every HUD from one place.",
   "text.cosmicprisonsmod.settings.button.open": "Mod Settings",
@@ -63,6 +63,11 @@
   "text.cosmicprisonsmod.feature.hud_leaderboards.description": "Track Gift, Gang, Blocks, and Level top 10 boards with compact and cycle modes.",
   "text.cosmicprisonsmod.feature.hud_leaderboards.example.line": "#1 Landon - 2.1M",
   "text.cosmicprisonsmod.feature.hud_leaderboards.example.modes": "Mode: Cycle one board or show all as separate HUDs.",
+  "text.cosmicprisonsmod.feature.server_widgets.icon": "SW",
+  "text.cosmicprisonsmod.feature.server_widgets.name": "Server Widgets",
+  "text.cosmicprisonsmod.feature.server_widgets.description": "Shows event-specific HUD panels sent by the server, including competitions and Prison Break.",
+  "text.cosmicprisonsmod.feature.server_widgets.example.comp": "Competition: top players and time remaining.",
+  "text.cosmicprisonsmod.feature.server_widgets.example.prisonbreak": "Prison Break: score, cooldowns, and proc feed.",
   "text.cosmicprisonsmod.feature.pings.icon": "PG",
   "text.cosmicprisonsmod.feature.pings.name": "Pings",
   "text.cosmicprisonsmod.feature.pings.description": "Use Gang and Truce ping keybinds to broadcast your location and show a moving beacon to your team.",
@@ -71,7 +76,7 @@
   "text.cosmicprisonsmod.feature.pings.bind.gang": "Gang Key: %s",
   "text.cosmicprisonsmod.feature.pings.bind.truce": "Truce Key: %s",
   "text.cosmicprisonsmod.feature.pings.bind_hint": "Click a key button, then press a key. ESC cancels.",
-  "text.cosmicprisonsmod.pings.unavailable.handshake": "Pings unavailable: companion handshake is not active.",
+  "text.cosmicprisonsmod.pings.unavailable.handshake": "Pings unavailable: Cosmic API session is not active.",
   "text.cosmicprisonsmod.pings.unavailable.disabled": "Pings are disabled in Mod Settings.",
   "text.cosmicprisonsmod.pings.unavailable.unsupported": "Pings unavailable: server has not enabled ping support.",
   "text.cosmicprisonsmod.pings.unavailable.channel": "Pings unavailable: network channel is not ready.",
@@ -85,6 +90,10 @@
   "text.cosmicprisonsmod.hud.leaderboard_blocks.title": "Blocks Top",
   "text.cosmicprisonsmod.hud.leaderboard_level.title": "Level Top",
   "text.cosmicprisonsmod.hud.leaderboard_cycle.title": "Leaderboard Cycle",
+  "text.cosmicprisonsmod.hud.comp_scoreboard.title": "Competition",
+  "text.cosmicprisonsmod.hud.prisonbreak_scoreboard.title": "Prison Break",
+  "text.cosmicprisonsmod.hud.prisonbreak_cooldowns.title": "Prison Break Cooldowns",
+  "text.cosmicprisonsmod.hud.prisonbreak_procs.title": "Prison Break Procs",
   "text.cosmicprisonsmod.hud.editor.title": "HUD Layout Editor",
   "text.cosmicprisonsmod.hud.editor.subtitle": "Drag widgets and scale each one for a tighter layout.",
   "text.cosmicprisonsmod.hud.editor.events_button": "Event Filters",
@@ -137,5 +146,5 @@
   "key.cosmicprisonsmod.ping.gang": "Gang Ping",
   "key.cosmicprisonsmod.ping.truce": "Truce Ping",
   "key.categories.cosmicprisonsmod.pings": "Cosmic Prisons Pings",
-  "category.cosmicprisonsmod": "Cosmic Prisons Companion"
+  "category.cosmicprisonsmod": "Cosmic Prisons Official Mod"
 }

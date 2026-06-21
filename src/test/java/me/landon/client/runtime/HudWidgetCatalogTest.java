@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import me.landon.client.feature.ClientFeatures;
+import me.landon.companion.config.CompanionConfig;
 import org.junit.jupiter.api.Test;
 
 class HudWidgetCatalogTest {
@@ -49,5 +51,23 @@ class HudWidgetCatalogTest {
         assertTrue(HudWidgetCatalog.isCooldownLineActive("Gang Join: 2m 1s"));
         assertFalse(HudWidgetCatalog.isCooldownLineActive("Gang Join: Now"));
         assertFalse(HudWidgetCatalog.isCooldownLineActive("Gang Join: 0s"));
+    }
+
+    @Test
+    void catalogIncludesServerCompanionCustomWidgets() {
+        assertEquals(
+                ClientFeatures.SERVER_WIDGETS_ID,
+                HudWidgetCatalog.findWidget(CompanionConfig.HUD_WIDGET_COMP_SCOREBOARD_ID)
+                        .orElseThrow()
+                        .featureId());
+        assertTrue(
+                HudWidgetCatalog.findWidget(CompanionConfig.HUD_WIDGET_PRISONBREAK_SCOREBOARD_ID)
+                        .isPresent());
+        assertTrue(
+                HudWidgetCatalog.findWidget(CompanionConfig.HUD_WIDGET_PRISONBREAK_COOLDOWNS_ID)
+                        .isPresent());
+        assertTrue(
+                HudWidgetCatalog.findWidget(CompanionConfig.HUD_WIDGET_PRISONBREAK_PROCS_ID)
+                        .isPresent());
     }
 }

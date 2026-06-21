@@ -1,9 +1,6 @@
 package me.landon.companion.protocol;
 
-import net.minecraft.util.Identifier;
-
 public final class ProtocolConstants {
-    public static final Identifier CHANNEL_ID = Identifier.of("servercompanion", "main");
     public static final int PROTOCOL_VERSION = 1;
 
     public static final int MAX_PACKET_BYTES = 16 * 1024;
@@ -23,6 +20,9 @@ public final class ProtocolConstants {
 
     public static final int SERVER_FEATURE_HUD_WIDGETS = 1 << 0;
     public static final int SERVER_FEATURE_ENTITY_MARKERS = 1 << 1;
+    public static final int SERVER_FEATURE_ASK_QUESTION = 1 << 2;
+    public static final int SERVER_FEATURE_BROADCAST = 1 << 3;
+    public static final int SERVER_FEATURE_PING_PONG = 1 << 4;
     public static final int FEATURE_GANG_TRUCE_PINGS = 1 << 6;
     public static final int SERVER_FEATURE_GANG_TRUCE_PINGS = FEATURE_GANG_TRUCE_PINGS;
     public static final int SERVER_FEATURE_INVENTORY_ITEM_OVERLAYS = 1 << 5;

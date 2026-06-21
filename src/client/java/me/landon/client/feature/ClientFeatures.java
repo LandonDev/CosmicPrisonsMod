@@ -3,7 +3,7 @@ package me.landon.client.feature;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
-import me.landon.companion.protocol.ProtocolConstants;
+import me.landon.cosmicapi.protocol.CosmicApiProtocolConstants;
 
 /**
  * Central catalog of client features.
@@ -20,7 +20,7 @@ public final class ClientFeatures {
                     "text.cosmicprisonsmod.feature.peaceful_mining.icon",
                     "text.cosmicprisonsmod.feature.peaceful_mining.description",
                     true,
-                    OptionalInt.of(ProtocolConstants.SERVER_FEATURE_ENTITY_MARKERS));
+                    OptionalInt.of(CosmicApiProtocolConstants.SERVER_FEATURE_ENTITY_MARKERS));
 
     public static final String INVENTORY_ITEM_OVERLAYS_ID = "inventory_item_overlays";
     public static final ClientFeatureDefinition INVENTORY_ITEM_OVERLAYS =
@@ -30,7 +30,8 @@ public final class ClientFeatures {
                     "text.cosmicprisonsmod.feature.inventory_item_overlays.icon",
                     "text.cosmicprisonsmod.feature.inventory_item_overlays.description",
                     true,
-                    OptionalInt.of(ProtocolConstants.SERVER_FEATURE_INVENTORY_ITEM_OVERLAYS));
+                    OptionalInt.of(
+                            CosmicApiProtocolConstants.SERVER_FEATURE_INVENTORY_ITEM_OVERLAYS));
 
     public static final String HUD_COOLDOWNS_ID = "hud_cooldowns";
     public static final ClientFeatureDefinition HUD_COOLDOWNS =
@@ -40,7 +41,7 @@ public final class ClientFeatures {
                     "text.cosmicprisonsmod.feature.hud_cooldowns.icon",
                     "text.cosmicprisonsmod.feature.hud_cooldowns.description",
                     true,
-                    OptionalInt.of(ProtocolConstants.SERVER_FEATURE_HUD_WIDGETS));
+                    OptionalInt.of(CosmicApiProtocolConstants.SERVER_FEATURE_HUD_WIDGETS));
 
     public static final String HUD_PETS_ID = "hud_pets";
     public static final ClientFeatureDefinition HUD_PETS =
@@ -50,7 +51,7 @@ public final class ClientFeatures {
                     "text.cosmicprisonsmod.feature.hud_pets.icon",
                     "text.cosmicprisonsmod.feature.hud_pets.description",
                     true,
-                    OptionalInt.of(ProtocolConstants.SERVER_FEATURE_HUD_WIDGETS));
+                    OptionalInt.of(CosmicApiProtocolConstants.SERVER_FEATURE_HUD_WIDGETS));
 
     public static final String HUD_EVENTS_ID = "hud_events";
     public static final ClientFeatureDefinition HUD_EVENTS =
@@ -60,7 +61,7 @@ public final class ClientFeatures {
                     "text.cosmicprisonsmod.feature.hud_events.icon",
                     "text.cosmicprisonsmod.feature.hud_events.description",
                     true,
-                    OptionalInt.of(ProtocolConstants.SERVER_FEATURE_HUD_WIDGETS));
+                    OptionalInt.of(CosmicApiProtocolConstants.SERVER_FEATURE_HUD_WIDGETS));
 
     public static final String HUD_SATCHEL_DISPLAY_ID = "hud_satchel_display";
     public static final ClientFeatureDefinition HUD_SATCHEL_DISPLAY =
@@ -70,7 +71,7 @@ public final class ClientFeatures {
                     "text.cosmicprisonsmod.feature.hud_satchel_display.icon",
                     "text.cosmicprisonsmod.feature.hud_satchel_display.description",
                     true,
-                    OptionalInt.of(ProtocolConstants.SERVER_FEATURE_HUD_WIDGETS));
+                    OptionalInt.of(CosmicApiProtocolConstants.SERVER_FEATURE_HUD_WIDGETS));
 
     public static final String HUD_GANG_ID = "hud_gang";
     public static final ClientFeatureDefinition HUD_GANG =
@@ -80,7 +81,7 @@ public final class ClientFeatures {
                     "text.cosmicprisonsmod.feature.hud_gang.icon",
                     "text.cosmicprisonsmod.feature.hud_gang.description",
                     true,
-                    OptionalInt.of(ProtocolConstants.SERVER_FEATURE_HUD_WIDGETS));
+                    OptionalInt.of(CosmicApiProtocolConstants.SERVER_FEATURE_HUD_WIDGETS));
 
     public static final String HUD_LEADERBOARDS_ID = "hud_leaderboards";
     public static final ClientFeatureDefinition HUD_LEADERBOARDS =
@@ -90,7 +91,17 @@ public final class ClientFeatures {
                     "text.cosmicprisonsmod.feature.hud_leaderboards.icon",
                     "text.cosmicprisonsmod.feature.hud_leaderboards.description",
                     true,
-                    OptionalInt.of(ProtocolConstants.SERVER_FEATURE_HUD_WIDGETS));
+                    OptionalInt.of(CosmicApiProtocolConstants.SERVER_FEATURE_HUD_WIDGETS));
+
+    public static final String SERVER_WIDGETS_ID = "server_widgets";
+    public static final ClientFeatureDefinition SERVER_WIDGETS =
+            new ClientFeatureDefinition(
+                    SERVER_WIDGETS_ID,
+                    "text.cosmicprisonsmod.feature.server_widgets.name",
+                    "text.cosmicprisonsmod.feature.server_widgets.icon",
+                    "text.cosmicprisonsmod.feature.server_widgets.description",
+                    true,
+                    OptionalInt.of(CosmicApiProtocolConstants.SERVER_FEATURE_HUD_WIDGETS));
 
     public static final String PINGS_ID = "pings";
     public static final ClientFeatureDefinition PINGS =
@@ -100,7 +111,7 @@ public final class ClientFeatures {
                     "text.cosmicprisonsmod.feature.pings.icon",
                     "text.cosmicprisonsmod.feature.pings.description",
                     true,
-                    OptionalInt.of(ProtocolConstants.FEATURE_GANG_TRUCE_PINGS));
+                    OptionalInt.of(CosmicApiProtocolConstants.FEATURE_GANG_TRUCE_PINGS));
 
     private static final List<ClientFeatureDefinition> ALL =
             List.of(
@@ -112,6 +123,7 @@ public final class ClientFeatures {
                     HUD_SATCHEL_DISPLAY,
                     HUD_GANG,
                     HUD_LEADERBOARDS,
+                    SERVER_WIDGETS,
                     PINGS);
 
     private ClientFeatures() {}
