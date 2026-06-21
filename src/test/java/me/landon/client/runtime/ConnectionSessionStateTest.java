@@ -7,7 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
-import me.landon.companion.protocol.ProtocolMessage;
+import me.landon.cosmicapi.protocol.CosmicApiRuntimePayloads;
 import org.junit.jupiter.api.Test;
 
 class ConnectionSessionStateTest {
@@ -16,11 +16,11 @@ class ConnectionSessionStateTest {
         ConnectionSessionState sessionState = new ConnectionSessionState();
         sessionState.replaceInventoryItemOverlays(
                 List.of(
-                        new ProtocolMessage.InventoryItemOverlay(0, 1, "12K"),
-                        new ProtocolMessage.InventoryItemOverlay(9, 2, "4.5M")));
+                        new CosmicApiRuntimePayloads.InventoryItemOverlay(0, 1, "12K"),
+                        new CosmicApiRuntimePayloads.InventoryItemOverlay(9, 2, "4.5M")));
 
         sessionState.replaceInventoryItemOverlays(
-                List.of(new ProtocolMessage.InventoryItemOverlay(1, 1, "22K")));
+                List.of(new CosmicApiRuntimePayloads.InventoryItemOverlay(1, 1, "22K")));
 
         assertNull(sessionState.getInventoryItemOverlay(0));
         assertNull(sessionState.getInventoryItemOverlay(9));
@@ -33,7 +33,7 @@ class ConnectionSessionStateTest {
     void emptySnapshotClearsOverlayMap() {
         ConnectionSessionState sessionState = new ConnectionSessionState();
         sessionState.replaceInventoryItemOverlays(
-                List.of(new ProtocolMessage.InventoryItemOverlay(0, 1, "8K")));
+                List.of(new CosmicApiRuntimePayloads.InventoryItemOverlay(0, 1, "8K")));
         assertTrue(sessionState.inventoryItemOverlaysSnapshot().containsKey(0));
 
         sessionState.replaceInventoryItemOverlays(List.of());
@@ -42,10 +42,26 @@ class ConnectionSessionStateTest {
     }
 
     @Test
+    void upsertAndRemoveOverlayKeepsOtherSlots() {
+        ConnectionSessionState sessionState = new ConnectionSessionState();
+        sessionState.replaceInventoryItemOverlays(
+                List.of(
+                        new CosmicApiRuntimePayloads.InventoryItemOverlay(0, 1, "8K"),
+                        new CosmicApiRuntimePayloads.InventoryItemOverlay(1, 2, "12K")));
+
+        sessionState.upsertInventoryItemOverlay(
+                new CosmicApiRuntimePayloads.InventoryItemOverlay(0, 1, "9K"));
+        sessionState.removeInventoryItemOverlay(1);
+
+        assertEquals("9K", sessionState.getInventoryItemOverlay(0).displayText());
+        assertNull(sessionState.getInventoryItemOverlay(1));
+    }
+
+    @Test
     void normalizesNmsHotbarSlots() {
         ConnectionSessionState sessionState = new ConnectionSessionState();
         sessionState.replaceInventoryItemOverlays(
-                List.of(new ProtocolMessage.InventoryItemOverlay(36, 1, "9K")));
+                List.of(new CosmicApiRuntimePayloads.InventoryItemOverlay(36, 1, "9K")));
 
         ConnectionSessionState.ItemOverlayEntry entry = sessionState.getInventoryItemOverlay(0);
         assertNotNull(entry);
@@ -57,7 +73,7 @@ class ConnectionSessionStateTest {
         ConnectionSessionState sessionState = new ConnectionSessionState();
         sessionState.setInventoryItemOverlaysSupported(true);
         sessionState.replaceInventoryItemOverlays(
-                List.of(new ProtocolMessage.InventoryItemOverlay(0, 1, "8K")));
+                List.of(new CosmicApiRuntimePayloads.InventoryItemOverlay(0, 1, "8K")));
 
         sessionState.reset();
 
@@ -70,11 +86,14 @@ class ConnectionSessionStateTest {
         ConnectionSessionState sessionState = new ConnectionSessionState();
         sessionState.replaceHudWidgets(
                 List.of(
-                        new ProtocolMessage.HudWidget("events", List.of("Meteor: 10m"), 0),
-                        new ProtocolMessage.HudWidget("cooldowns", List.of("Gang Join: 2m"), 5)));
+                        new CosmicApiRuntimePayloads.HudWidget("events", List.of("Meteor: 10m"), 0),
+                        new CosmicApiRuntimePayloads.HudWidget(
+                                "cooldowns", List.of("Gang Join: 2m"), 5)));
 
         sessionState.replaceHudWidgets(
-                List.of(new ProtocolMessage.HudWidget("satchels", List.of("Coal: 1K/2K x1"), 0)));
+                List.of(
+                        new CosmicApiRuntimePayloads.HudWidget(
+                                "satchels", List.of("Coal: 1K/2K x1"), 0)));
 
         assertNull(sessionState.getHudWidget("events"));
         assertNull(sessionState.getHudWidget("cooldowns"));
@@ -88,12 +107,31 @@ class ConnectionSessionStateTest {
         ConnectionSessionState sessionState = new ConnectionSessionState();
         sessionState.setHudWidgetsSupported(true);
         sessionState.replaceHudWidgets(
-                List.of(new ProtocolMessage.HudWidget("events", List.of("Meteor: 1m"), 1)));
+                List.of(
+                        new CosmicApiRuntimePayloads.HudWidget(
+                                "events", List.of("Meteor: 1m"), 1)));
 
         sessionState.reset();
 
         assertTrue(sessionState.hudWidgetsSnapshot().isEmpty());
         assertFalse(sessionState.hudWidgetsSupported());
+    }
+
+    @Test
+    void upsertAndRemoveHudWidgetKeepsOtherWidgets() {
+        ConnectionSessionState sessionState = new ConnectionSessionState();
+        sessionState.replaceHudWidgets(
+                List.of(
+                        new CosmicApiRuntimePayloads.HudWidget("events", List.of("Meteor"), 0),
+                        new CosmicApiRuntimePayloads.HudWidget(
+                                "cooldowns", List.of("Charge: 8s"), 0)));
+
+        sessionState.upsertHudWidget(
+                new CosmicApiRuntimePayloads.HudWidget("events", List.of("Meteor: 2m"), 0));
+        sessionState.removeHudWidget("cooldowns");
+
+        assertEquals(List.of("Meteor: 2m"), sessionState.getHudWidget("events").lines());
+        assertNull(sessionState.getHudWidget("cooldowns"));
     }
 
     @Test
@@ -120,6 +158,32 @@ class ConnectionSessionStateTest {
 
         assertFalse(sessionState.isPeacefulMiningPassThroughEntity(11));
         assertTrue(sessionState.peacefulMiningPassThroughIdsSnapshot().isEmpty());
+    }
+
+    @Test
+    void sameGangDeltaAddsAndRemovesEntityIds() {
+        ConnectionSessionState sessionState = new ConnectionSessionState();
+
+        sessionState.applySameGangEntityDelta(List.of(3, 12, 19), List.of());
+        assertTrue(sessionState.isSameGangEntity(3));
+        assertTrue(sessionState.isSameGangEntity(12));
+        assertTrue(sessionState.isSameGangEntity(19));
+
+        sessionState.applySameGangEntityDelta(List.of(), List.of(12, 44));
+        assertFalse(sessionState.isSameGangEntity(12));
+        assertTrue(sessionState.isSameGangEntity(19));
+    }
+
+    @Test
+    void resetClearsSameGangEntityIds() {
+        ConnectionSessionState sessionState = new ConnectionSessionState();
+        sessionState.applySameGangEntityDelta(List.of(11), List.of());
+        assertTrue(sessionState.isSameGangEntity(11));
+
+        sessionState.reset();
+
+        assertFalse(sessionState.isSameGangEntity(11));
+        assertTrue(sessionState.sameGangEntityIdsSnapshot().isEmpty());
     }
 
     @Test

@@ -23,12 +23,17 @@ public final class CosmicApiRawPayload implements CustomPayload {
     }
 
     private static CosmicApiRawPayload decode(PacketByteBuf buf) {
-        return new CosmicApiRawPayload(
-                buf.readByteArray(CosmicApiProtocolConstants.MAX_PACKET_BYTES));
+        int length = buf.readableBytes();
+        if (length > CosmicApiProtocolConstants.MAX_PACKET_BYTES) {
+            throw new IllegalArgumentException("Cosmic API payload exceeds maximum allowed bytes");
+        }
+        byte[] bytes = new byte[length];
+        buf.readBytes(bytes);
+        return new CosmicApiRawPayload(bytes);
     }
 
     private static void encode(CosmicApiRawPayload payload, PacketByteBuf buf) {
-        buf.writeByteArray(payload.payloadBytes);
+        buf.writeBytes(payload.payloadBytes);
     }
 
     @Override

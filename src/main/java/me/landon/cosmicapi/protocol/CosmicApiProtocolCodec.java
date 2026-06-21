@@ -1,10 +1,21 @@
 package me.landon.cosmicapi.protocol;
 
+import com.google.gson.Gson;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import com.google.gson.reflect.TypeToken;
+import java.lang.reflect.Type;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 public final class CosmicApiProtocolCodec {
+    private static final Gson GSON = new Gson();
+    private static final Type MAP_TYPE = new TypeToken<Map<String, Object>>() {}.getType();
+
     public byte[] encodeClientHello(CosmicApiClientHello hello) {
         StringBuilder builder = new StringBuilder(512);
         builder.append('{');
@@ -36,6 +47,34 @@ public final class CosmicApiProtocolCodec {
         return bytes;
     }
 
+    public byte[] encodeClientAction(
+            String sessionId, String actionType, Map<String, Object> payload) {
+        Map<String, Object> message = new LinkedHashMap<>();
+        message.put("type", "action");
+        message.put("sessionId", normalizeOptional(sessionId));
+        message.put("actionType", normalizeOptional(actionType));
+        message.put("payload", payload == null ? Map.of() : new LinkedHashMap<>(payload));
+        return encodeJsonMessage(message);
+    }
+
+    public byte[] encodeClientEvent(
+            String sessionId, String eventType, Map<String, Object> payload) {
+        Map<String, Object> message = new LinkedHashMap<>();
+        message.put("type", "event");
+        message.put("sessionId", normalizeOptional(sessionId));
+        message.put("eventType", normalizeOptional(eventType));
+        message.put("payload", payload == null ? Map.of() : new LinkedHashMap<>(payload));
+        return encodeJsonMessage(message);
+    }
+
+    public byte[] encodeClientPing(String sessionId, long clientTimeMillis) {
+        Map<String, Object> message = new LinkedHashMap<>();
+        message.put("type", "ping");
+        message.put("sessionId", normalizeOptional(sessionId));
+        message.put("clientTimeMillis", Math.max(0L, clientTimeMillis));
+        return encodeJsonMessage(message);
+    }
+
     public CosmicApiServerMessage decodeServerMessage(byte[] bytes) {
         if (bytes == null || bytes.length == 0) {
             throw new IllegalArgumentException("Cosmic API payload is empty");
@@ -44,18 +83,88 @@ public final class CosmicApiProtocolCodec {
             throw new IllegalArgumentException("Cosmic API payload exceeds maximum allowed bytes");
         }
         String json = new String(bytes, StandardCharsets.UTF_8);
+        JsonObject object = JsonParser.parseString(json).getAsJsonObject();
         return new CosmicApiServerMessage(
-                readStringField(json, "type"),
-                readStringField(json, "event"),
-                readBooleanField(json, "allowed"),
-                readStringField(json, "sessionId"),
-                readStringField(json, "requestId"),
-                readStringField(json, "reason"),
-                readStringField(json, "appName"),
-                readStringArrayField(json, "allowedScopes"),
+                readStringField(object, "type"),
+                readStringField(object, "event"),
+                firstNonBlank(
+                        readStringField(object, "actionType"),
+                        readStringField(object, "action"),
+                        readStringField(object, "eventType")),
+                readBooleanField(object, "allowed"),
+                readStringField(object, "sessionId"),
+                readStringField(object, "requestId"),
+                readStringField(object, "reason"),
+                readStringField(object, "appName"),
+                readStringField(object, "serverScope"),
+                readStringArrayField(object, "allowedScopes"),
                 firstNonEmpty(
-                        readStringArrayField(json, "allowedHooks"),
-                        readStringArrayField(json, "allowedHookEvents")));
+                        readStringArrayField(object, "allowedHooks"),
+                        readStringArrayField(object, "allowedHookEvents")),
+                readObjectMap(object, "payload"));
+    }
+
+    private static byte[] encodeJsonMessage(Map<String, Object> message) {
+        byte[] bytes = GSON.toJson(message).getBytes(StandardCharsets.UTF_8);
+        if (bytes.length > CosmicApiProtocolConstants.MAX_PACKET_BYTES) {
+            throw new IllegalArgumentException("Cosmic API payload exceeds maximum allowed bytes");
+        }
+        return bytes;
+    }
+
+    private static String normalizeOptional(String value) {
+        return value == null ? "" : value.trim();
+    }
+
+    private static String readStringField(JsonObject object, String fieldName) {
+        JsonElement element = object.get(fieldName);
+        if (element == null || element.isJsonNull() || !element.isJsonPrimitive()) {
+            return "";
+        }
+        return element.getAsString();
+    }
+
+    private static boolean readBooleanField(JsonObject object, String fieldName) {
+        JsonElement element = object.get(fieldName);
+        return element != null
+                && !element.isJsonNull()
+                && element.isJsonPrimitive()
+                && element.getAsBoolean();
+    }
+
+    private static List<String> readStringArrayField(JsonObject object, String fieldName) {
+        JsonElement element = object.get(fieldName);
+        if (element == null || element.isJsonNull() || !element.isJsonArray()) {
+            return List.of();
+        }
+
+        List<String> values = new ArrayList<>();
+        for (JsonElement entry : element.getAsJsonArray()) {
+            if (entry == null || entry.isJsonNull()) {
+                continue;
+            }
+            values.add(entry.getAsString());
+        }
+        return List.copyOf(values);
+    }
+
+    private static Map<String, Object> readObjectMap(JsonObject object, String fieldName) {
+        JsonElement element = object.get(fieldName);
+        if (element == null || element.isJsonNull() || !element.isJsonObject()) {
+            return Map.of();
+        }
+        Map<String, Object> values = GSON.fromJson(element, MAP_TYPE);
+        return values == null ? Map.of() : new LinkedHashMap<>(values);
+    }
+
+    private static String firstNonBlank(String first, String second, String third) {
+        if (first != null && !first.isBlank()) {
+            return first;
+        }
+        if (second != null && !second.isBlank()) {
+            return second;
+        }
+        return third == null ? "" : third;
     }
 
     private static void appendStringField(StringBuilder builder, String name, String value) {

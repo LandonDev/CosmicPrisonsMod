@@ -39,6 +39,10 @@ public final class ConnectionGateState {
         enabled = false;
     }
 
+    public void enableTrustedSession() {
+        enabled = true;
+    }
+
     public boolean shouldProcessIncoming(ProtocolMessage message) {
         if (enabled) {
             return true;

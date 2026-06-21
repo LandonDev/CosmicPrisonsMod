@@ -47,7 +47,7 @@ loom {
 repositories {
 }
 
-def lunarModsDir = file("${System.getProperty('user.home')}/.lunarclient/profiles/lunar/1.21/mods/fabric-1.21.11")
+def lunarModsDir = file("${System.getProperty('user.home')}/.lunarclient/profiles/1.21/mods/fabric-1.21.11")
 def runModsDir = file("$projectDir/run/mods")
 
 tasks.register('downloadPlasmoVoice') {

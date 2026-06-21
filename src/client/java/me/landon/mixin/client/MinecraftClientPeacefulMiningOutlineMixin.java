@@ -17,7 +17,9 @@ public abstract class MinecraftClientPeacefulMiningOutlineMixin {
             return;
         }
 
-        if (CompanionClientRuntime.getInstance().isPeacefulMiningGhostedEntity(entity.getId())) {
+        CompanionClientRuntime runtime = CompanionClientRuntime.getInstance();
+        if (runtime.isPeacefulMiningGhostedEntity(entity.getId())
+                || runtime.isSameGangMarkedEntity(entity.getId())) {
             callbackInfo.setReturnValue(true);
         }
     }

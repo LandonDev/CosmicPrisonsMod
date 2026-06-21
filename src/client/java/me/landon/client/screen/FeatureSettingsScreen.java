@@ -5,7 +5,7 @@ import java.util.List;
 import me.landon.client.feature.ClientFeatureDefinition;
 import me.landon.client.feature.ClientFeatures;
 import me.landon.client.runtime.CompanionClientRuntime;
-import me.landon.companion.protocol.ProtocolConstants;
+import me.landon.cosmicapi.protocol.CosmicApiProtocolConstants;
 import net.minecraft.client.gui.Click;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.GameMenuScreen;
@@ -602,6 +602,25 @@ public final class FeatureSettingsScreen extends Screen {
             return;
         }
 
+        if (ClientFeatures.SERVER_WIDGETS_ID.equals(feature.id())) {
+            drawPopupTextExample(
+                    drawContext,
+                    leftExampleX,
+                    examplesY,
+                    exampleWidth,
+                    exampleHeight,
+                    Text.translatable("text.cosmicprisonsmod.feature.server_widgets.example.comp"));
+            drawPopupTextExample(
+                    drawContext,
+                    rightExampleX,
+                    examplesY,
+                    exampleWidth,
+                    exampleHeight,
+                    Text.translatable(
+                            "text.cosmicprisonsmod.feature.server_widgets.example.prisonbreak"));
+            return;
+        }
+
         if (ClientFeatures.PINGS_ID.equals(feature.id())) {
             drawPopupTextExample(
                     drawContext,
@@ -631,7 +650,7 @@ public final class FeatureSettingsScreen extends Screen {
                 exampleWidth,
                 exampleHeight,
                 Items.LIGHT_BLUE_DYE,
-                ProtocolConstants.OVERLAY_TYPE_COSMIC_ENERGY,
+                CosmicApiProtocolConstants.OVERLAY_TYPE_COSMIC_ENERGY,
                 Text.translatable(
                                 "text.cosmicprisonsmod.feature.inventory_item_overlays.example.cosmic_value")
                         .getString(),
@@ -644,7 +663,7 @@ public final class FeatureSettingsScreen extends Screen {
                 exampleWidth,
                 exampleHeight,
                 Items.PAPER,
-                ProtocolConstants.OVERLAY_TYPE_MONEY_NOTE,
+                CosmicApiProtocolConstants.OVERLAY_TYPE_MONEY_NOTE,
                 Text.translatable(
                                 "text.cosmicprisonsmod.feature.inventory_item_overlays.example.money_value")
                         .getString(),
@@ -752,7 +771,7 @@ public final class FeatureSettingsScreen extends Screen {
                     drawContext,
                     itemX,
                     itemY,
-                    ProtocolConstants.OVERLAY_TYPE_COSMIC_ENERGY,
+                    CosmicApiProtocolConstants.OVERLAY_TYPE_COSMIC_ENERGY,
                     Text.translatable(
                                     "text.cosmicprisonsmod.feature.inventory_item_overlays.example.cosmic_value")
                             .getString(),
@@ -932,24 +951,24 @@ public final class FeatureSettingsScreen extends Screen {
 
     private static int overlayTextColor(int overlayType) {
         return switch (overlayType) {
-            case ProtocolConstants.OVERLAY_TYPE_COSMIC_ENERGY -> 0xFF5DE6FF;
-            case ProtocolConstants.OVERLAY_TYPE_MONEY_NOTE -> 0xFF84F08F;
-            case ProtocolConstants.OVERLAY_TYPE_GANG_POINT_NOTE -> 0xFFFFC659;
-            case ProtocolConstants.OVERLAY_TYPE_SATCHEL_PERCENT -> 0xFFB5E86C;
-            case ProtocolConstants.OVERLAY_TYPE_PET_ACTIVE -> 0xFF8BF5C2;
-            case ProtocolConstants.OVERLAY_TYPE_PET_COOLDOWN -> 0xFFFFB27D;
+            case CosmicApiProtocolConstants.OVERLAY_TYPE_COSMIC_ENERGY -> 0xFF5DE6FF;
+            case CosmicApiProtocolConstants.OVERLAY_TYPE_MONEY_NOTE -> 0xFF84F08F;
+            case CosmicApiProtocolConstants.OVERLAY_TYPE_GANG_POINT_NOTE -> 0xFFFFC659;
+            case CosmicApiProtocolConstants.OVERLAY_TYPE_SATCHEL_PERCENT -> 0xFFB5E86C;
+            case CosmicApiProtocolConstants.OVERLAY_TYPE_PET_ACTIVE -> 0xFF8BF5C2;
+            case CosmicApiProtocolConstants.OVERLAY_TYPE_PET_COOLDOWN -> 0xFFFFB27D;
             default -> 0xFFE6E6E6;
         };
     }
 
     private static int overlayBackgroundColor(int overlayType) {
         return switch (overlayType) {
-            case ProtocolConstants.OVERLAY_TYPE_COSMIC_ENERGY -> 0xA01E3F52;
-            case ProtocolConstants.OVERLAY_TYPE_MONEY_NOTE -> 0xA01B3C25;
-            case ProtocolConstants.OVERLAY_TYPE_GANG_POINT_NOTE -> 0xA04A361A;
-            case ProtocolConstants.OVERLAY_TYPE_SATCHEL_PERCENT -> 0xA0284A1E;
-            case ProtocolConstants.OVERLAY_TYPE_PET_ACTIVE -> 0xA01D4733;
-            case ProtocolConstants.OVERLAY_TYPE_PET_COOLDOWN -> 0xA04E2A1B;
+            case CosmicApiProtocolConstants.OVERLAY_TYPE_COSMIC_ENERGY -> 0xA01E3F52;
+            case CosmicApiProtocolConstants.OVERLAY_TYPE_MONEY_NOTE -> 0xA01B3C25;
+            case CosmicApiProtocolConstants.OVERLAY_TYPE_GANG_POINT_NOTE -> 0xA04A361A;
+            case CosmicApiProtocolConstants.OVERLAY_TYPE_SATCHEL_PERCENT -> 0xA0284A1E;
+            case CosmicApiProtocolConstants.OVERLAY_TYPE_PET_ACTIVE -> 0xA01D4733;
+            case CosmicApiProtocolConstants.OVERLAY_TYPE_PET_COOLDOWN -> 0xA04E2A1B;
             default -> 0xA0333333;
         };
     }

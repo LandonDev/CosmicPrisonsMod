@@ -21,6 +21,10 @@ public final class CompanionConfig {
     public static final String HUD_WIDGET_LEADERBOARD_BLOCKS_ID = "leaderboard_blocks";
     public static final String HUD_WIDGET_LEADERBOARD_LEVEL_ID = "leaderboard_level";
     public static final String HUD_WIDGET_LEADERBOARD_CYCLE_ID = "leaderboard_cycle";
+    public static final String HUD_WIDGET_COMP_SCOREBOARD_ID = "comp_scoreboard";
+    public static final String HUD_WIDGET_PRISONBREAK_SCOREBOARD_ID = "prisonbreak_scoreboard";
+    public static final String HUD_WIDGET_PRISONBREAK_COOLDOWNS_ID = "prisonbreak_cooldowns";
+    public static final String HUD_WIDGET_PRISONBREAK_PROCS_ID = "prisonbreak_procs";
     public static final String HUD_EVENT_METEORITE = "meteorite";
     public static final String HUD_EVENT_METEOR = "meteor";
     public static final String HUD_EVENT_ALTAR_SPAWN = "altar_spawn";
@@ -60,7 +64,11 @@ public final class CompanionConfig {
                     HUD_WIDGET_LEADERBOARD_GANG_ID,
                     HUD_WIDGET_LEADERBOARD_BLOCKS_ID,
                     HUD_WIDGET_LEADERBOARD_LEVEL_ID,
-                    HUD_WIDGET_LEADERBOARD_CYCLE_ID);
+                    HUD_WIDGET_LEADERBOARD_CYCLE_ID,
+                    HUD_WIDGET_COMP_SCOREBOARD_ID,
+                    HUD_WIDGET_PRISONBREAK_SCOREBOARD_ID,
+                    HUD_WIDGET_PRISONBREAK_COOLDOWNS_ID,
+                    HUD_WIDGET_PRISONBREAK_PROCS_ID);
     public static final double HUD_WIDGET_SCALE_MIN = 0.55D;
     public static final double HUD_WIDGET_SCALE_MAX = 1.65D;
     public static final double HUD_WIDGET_WIDTH_MULTIPLIER_MIN = 0.55D;
@@ -73,7 +81,6 @@ public final class CompanionConfig {
     public static final String PING_VISUAL_MODE_DEFAULT = PING_VISUAL_MODE_FOLLOW;
 
     public List<String> allowedServerIds = new ArrayList<>();
-    public boolean enablePayloadCodecFallback = false;
     public Map<String, Boolean> featureToggles = new LinkedHashMap<>();
     public Map<String, HudWidgetPosition> hudWidgetPositions = new LinkedHashMap<>();
     public Map<String, Double> hudWidgetScales = new LinkedHashMap<>();
@@ -310,6 +317,10 @@ public final class CompanionConfig {
         defaults.put(HUD_WIDGET_LEADERBOARD_BLOCKS_ID, new HudWidgetPosition(0.70D, 0.38D));
         defaults.put(HUD_WIDGET_LEADERBOARD_LEVEL_ID, new HudWidgetPosition(0.43D, 0.38D));
         defaults.put(HUD_WIDGET_LEADERBOARD_CYCLE_ID, new HudWidgetPosition(0.43D, 0.08D));
+        defaults.put(HUD_WIDGET_COMP_SCOREBOARD_ID, new HudWidgetPosition(0.43D, 0.56D));
+        defaults.put(HUD_WIDGET_PRISONBREAK_SCOREBOARD_ID, new HudWidgetPosition(0.43D, 0.52D));
+        defaults.put(HUD_WIDGET_PRISONBREAK_COOLDOWNS_ID, new HudWidgetPosition(0.70D, 0.52D));
+        defaults.put(HUD_WIDGET_PRISONBREAK_PROCS_ID, new HudWidgetPosition(0.70D, 0.73D));
         return defaults;
     }
 
@@ -325,6 +336,10 @@ public final class CompanionConfig {
         defaults.put(HUD_WIDGET_LEADERBOARD_BLOCKS_ID, 0.74D);
         defaults.put(HUD_WIDGET_LEADERBOARD_LEVEL_ID, 0.74D);
         defaults.put(HUD_WIDGET_LEADERBOARD_CYCLE_ID, 0.74D);
+        defaults.put(HUD_WIDGET_COMP_SCOREBOARD_ID, 0.76D);
+        defaults.put(HUD_WIDGET_PRISONBREAK_SCOREBOARD_ID, 0.76D);
+        defaults.put(HUD_WIDGET_PRISONBREAK_COOLDOWNS_ID, 0.76D);
+        defaults.put(HUD_WIDGET_PRISONBREAK_PROCS_ID, 0.76D);
         return defaults;
     }
 
@@ -340,6 +355,10 @@ public final class CompanionConfig {
         defaults.put(HUD_WIDGET_LEADERBOARD_BLOCKS_ID, 0.92D);
         defaults.put(HUD_WIDGET_LEADERBOARD_LEVEL_ID, 0.92D);
         defaults.put(HUD_WIDGET_LEADERBOARD_CYCLE_ID, 0.92D);
+        defaults.put(HUD_WIDGET_COMP_SCOREBOARD_ID, 1.0D);
+        defaults.put(HUD_WIDGET_PRISONBREAK_SCOREBOARD_ID, 1.0D);
+        defaults.put(HUD_WIDGET_PRISONBREAK_COOLDOWNS_ID, 1.0D);
+        defaults.put(HUD_WIDGET_PRISONBREAK_PROCS_ID, 1.0D);
         return defaults;
     }
 
